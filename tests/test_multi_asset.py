@@ -1,5 +1,7 @@
 """Tests for the multi-asset data pipeline (Phase 1) and model (Phase 2)."""
 
+import math
+
 import numpy as np
 import pandas as pd
 import torch
@@ -251,3 +253,116 @@ def test_gradient_flows_to_all_parameters():
     for name, param in model.named_parameters():
         assert param.grad is not None, f"no gradient for {name}"
         assert torch.isfinite(param.grad).all(), f"non-finite gradient for {name}"
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: MultiAssetNeuralSDERunner (multivariate Gaussian NLL)
+# ---------------------------------------------------------------------------
+
+from torch.utils.data import DataLoader
+
+from amgm.models.neural_SDE.multi_runner import MultiAssetNeuralSDERunner
+
+GBM_DT = 1.0 / 252.0
+
+
+def _make_runner(n_assets=4, corr_init=None):
+    model_cfg = dict(
+        _target_=NeuralSDEMoEMultiAsset,
+        lookback_window=LOOKBACK,
+        n_assets=n_assets,
+        num_features=FIB_NUM_LEVELS,
+        hidden_sizes=[32, 16],
+        corr_init=corr_init,
+    )
+    return MultiAssetNeuralSDERunner(
+        run_cfg=dict(batch_size=64),
+        dset_cfg=dict(dt=GBM_DT, eps=1e-6),
+        model_cfg=model_cfg,
+        loss_cfg=dict(_target_=nn.MSELoss),
+        acc_cfg=dict(),
+        optim_cfg=dict(_target_=torch.optim.Adam, lr=1e-3),
+        sched_cfg=None,
+        compile_model=False,
+    )
+
+
+def _equicorr(n_assets, rho):
+    return (1.0 - rho) * np.eye(n_assets) + rho * np.ones((n_assets, n_assets))
+
+
+def test_runner_compute_loss_shapes_and_finite():
+    syn = SyntheticCorrelatedGBMDataset(n_assets=4, lookback_window=LOOKBACK, num_paths=16, steps_per_path=8)
+    runner = _make_runner(n_assets=4, corr_init=syn.asset_corr_init)
+    batch = next(iter(DataLoader(syn, batch_size=64)))
+    out = runner._compute_loss(batch)
+    assert torch.isfinite(out["loss"])
+    assert out["mu"].shape == (64, 4)
+    assert out["sigma"].shape == (64, 4)
+    assert out["chol_sigma"].shape == (64, 4, 4)
+    assert out["x_t"].shape == (64, 4)
+    assert out["x_tp1_pred"].shape == (64, 4)
+    assert out["pi_mean"].shape == (3,)
+    assert out["pi_var"].shape == (3,)
+
+
+def test_multivariate_nll_prefers_true_correlation():
+    syn = SyntheticCorrelatedGBMDataset(
+        n_assets=4, lookback_window=LOOKBACK, num_paths=256, steps_per_path=32, rho=0.4, rng_seed=11
+    )
+    runner = _make_runner(n_assets=4)
+    batch = next(iter(DataLoader(syn, batch_size=4096)))
+    x_window, f_t, x_t, x_tp1, _ = runner._prepare_batch(batch)
+
+    def nll_with_corr(corr):
+        corr_t = torch.as_tensor(corr, dtype=torch.float32)
+        runner.model.chol_corr_param.data = torch.linalg.cholesky(corr_t + 1e-6 * torch.eye(4))
+        with torch.no_grad():
+            mu, chol_sigma, _ = runner.model(x_window, f_t)
+        # mu/sigma do not depend on the correlation parameter, so this isolates R
+        return runner._step_nll(x_t, x_tp1, mu, chol_sigma).item()
+
+    nll_true = nll_with_corr(syn.true_corr)
+    nll_identity = nll_with_corr(np.eye(4))
+    nll_wrong_sign = nll_with_corr(_equicorr(4, -0.2))
+    assert nll_true < nll_identity
+    assert nll_true < nll_wrong_sign
+
+
+def test_whitened_residuals_decorrelated_with_true_corr():
+    syn = SyntheticCorrelatedGBMDataset(
+        n_assets=4, lookback_window=LOOKBACK, num_paths=256, steps_per_path=32, rho=0.4, rng_seed=5
+    )
+    runner = _make_runner(n_assets=4)
+    batch = next(iter(DataLoader(syn, batch_size=8192)))
+    x_window, f_t, x_t, x_tp1, _ = runner._prepare_batch(batch)
+
+    def whitened_cross_corr(corr):
+        corr_t = torch.as_tensor(corr, dtype=torch.float32)
+        runner.model.chol_corr_param.data = torch.linalg.cholesky(corr_t + 1e-6 * torch.eye(4))
+        with torch.no_grad():
+            mu, chol_sigma, _ = runner.model(x_window, f_t)
+        L = chol_sigma * math.sqrt(GBM_DT)
+        dx = (x_tp1 - x_t - mu * GBM_DT).unsqueeze(-1)
+        z = torch.linalg.solve_triangular(L, dx, upper=False).squeeze(-1).numpy()
+        z_corr = np.corrcoef(z, rowvar=False)
+        off_diag = z_corr[~np.eye(4, dtype=bool)]
+        return np.abs(off_diag).mean()
+
+    # Diagonal scaling does not change correlations, so untrained sigma heads are fine here:
+    # whitening with the true R must decorrelate, whitening with identity must not.
+    assert whitened_cross_corr(syn.true_corr) < 0.05
+    assert whitened_cross_corr(np.eye(4)) > 0.15
+
+
+def test_entropy_balance_uses_flattened_pi():
+    syn = SyntheticCorrelatedGBMDataset(n_assets=3, lookback_window=LOOKBACK, num_paths=8, steps_per_path=4)
+    runner = _make_runner(n_assets=3)
+    batch = next(iter(DataLoader(syn, batch_size=16)))
+    out = runner._compute_loss(batch)
+    with torch.no_grad():
+        _, _, pi = runner.model(batch.price_window, batch.features)
+    pi_flat = pi.reshape(-1, 3)
+    assert torch.allclose(out["pi_mean"], pi_flat.mean(dim=0), atol=1e-6)
+    expected_entropy = -(pi_flat * torch.log(pi_flat + 1e-8)).sum(dim=-1).mean()
+    assert torch.allclose(out["mean_entropy"], expected_entropy, atol=1e-6)
