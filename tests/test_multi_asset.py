@@ -1,6 +1,8 @@
-"""Tests for the multi-asset data pipeline (Phase 1) and model (Phase 2)."""
+"""Tests for the multi-asset data pipeline (Phase 1), model (Phase 2),
+runner (Phase 3), and training entry/config (Phase 4)."""
 
 import math
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -366,3 +368,73 @@ def test_entropy_balance_uses_flattened_pi():
     assert torch.allclose(out["pi_mean"], pi_flat.mean(dim=0), atol=1e-6)
     expected_entropy = -(pi_flat * torch.log(pi_flat + 1e-8)).sum(dim=-1).mean()
     assert torch.allclose(out["mean_entropy"], expected_entropy, atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: training loop smoke test + multivariate calibration
+# ---------------------------------------------------------------------------
+
+
+def test_smoke_training_one_epoch_synthetic_gbm():
+    from lightning import Trainer
+
+    syn = SyntheticCorrelatedGBMDataset(n_assets=3, lookback_window=LOOKBACK, num_paths=16, steps_per_path=8)
+    runner = _make_runner(n_assets=3, corr_init=syn.asset_corr_init)
+    corr_init_chol = runner.model.chol_corr_param.data.clone()
+    loader = DataLoader(syn, batch_size=32)
+    trainer = Trainer(
+        max_epochs=1,
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        accelerator="cpu",
+    )
+    trainer.fit(runner, train_dataloaders=loader, val_dataloaders=loader)
+    assert torch.isfinite(runner.trainer.callback_metrics["val/loss"])
+    # Lightning clears grads after fit; a moved parameter proves gradient flow
+    # through the full training loop (Adam moves params even on tiny grads).
+    assert not torch.allclose(runner.model.chol_corr_param.data, corr_init_chol)
+
+    predictions = trainer.predict(runner, dataloaders=loader)
+    assert "chol_sigma" in predictions[0]
+    assert predictions[0]["chol_sigma"].shape[-2:] == (3, 3)
+
+
+def test_multivariate_calibration_whitens_with_true_corr():
+    syn = SyntheticCorrelatedGBMDataset(
+        n_assets=4, lookback_window=LOOKBACK, num_paths=256, steps_per_path=16, rho=0.4, rng_seed=5
+    )
+    runner = _make_runner(n_assets=4)
+    corr_t = torch.as_tensor(syn.true_corr, dtype=torch.float32)
+    runner.model.chol_corr_param.data = torch.linalg.cholesky(corr_t + 1e-6 * torch.eye(4))
+
+    loader = DataLoader(syn, batch_size=4096)
+    predictions = [runner.predict_step(batch, idx) for idx, batch in enumerate(loader)]
+
+    metrics = common.evaluate_multivariate_residual_calibration(predictions, dict(dt=GBM_DT))
+    # Whitening with the true R decorrelates regardless of the (untrained) sigma
+    # heads: cross-correlation is invariant to diagonal rescaling.
+    assert metrics["z_cross_corr_abs_mean"] < 0.05
+    assert metrics["z_cross_corr_abs_max"] < 0.15
+    assert metrics["n_residuals"] == len(syn) * 4
+
+    # Identity correlation must fail to decorrelate the same residuals.
+    runner.model.chol_corr_param.data = torch.eye(4)
+    predictions_id = [runner.predict_step(batch, idx) for idx, batch in enumerate(loader)]
+    metrics_id = common.evaluate_multivariate_residual_calibration(predictions_id, dict(dt=GBM_DT))
+    assert metrics_id["z_cross_corr_abs_mean"] > 0.15
+
+
+def test_trainer_cfg_modules_build():
+    import importlib.util
+
+    cfg_dir = Path(__file__).resolve().parents[1] / "experiments" / "neural_SDE" / "trainer_cfg" / "neural_SDE"
+    for name in ("US_Stocks_Multi", "synthetic_gbm_multi"):
+        spec = importlib.util.spec_from_file_location(name, cfg_dir / f"{name}.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        cfg = module.get_trainer_cfg()
+        assert cfg["model_cfg"]["_target_"] is NeuralSDEMoEMultiAsset
+        assert cfg["model_cfg"]["num_features"] == FIB_NUM_LEVELS
+        assert cfg["model_cfg"]["lookback_window"] == cfg["dset_cfg"]["lookback_window"]
+        assert "corr_init" in cfg["model_cfg"] and "n_assets" in cfg["model_cfg"]
