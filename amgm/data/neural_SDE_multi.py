@@ -139,6 +139,7 @@ class MultiAssetNeuralSDEDataset(BaseAMData, Dataset):
         self.basket_issue_ids = basket
         self.n_assets = len(basket)
         self.dates = dates
+        self.prices_aligned = prices  # (T, N) aligned price matrix, kept for fetching real futures during generation
 
         price_windows, nxt_prices, test_dates = self._make_windows(prices, dates)
         norm_windows, norm_nxt, sample_min, sample_range = _min_max_normalize_multi(price_windows, nxt_prices)

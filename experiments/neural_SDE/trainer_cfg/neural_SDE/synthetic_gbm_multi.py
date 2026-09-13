@@ -60,6 +60,7 @@ def get_trainer_cfg():
         entropy_beta_warmup_steps=200,
         entropy_beta_decay_steps=800,
         expert_balance_lambda=0,
+        compile_model=False,  # CPU training: torch.compile needs Python dev headers and gains little for this model size
     )
 
     return trainer_cfg

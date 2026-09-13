@@ -12,7 +12,10 @@ from torch import nn
 from amgm.data.neural_SDE_multi import (
     FIB_NUM_LEVELS,
     MultiAssetNeuralSDEDataset,
+    MultiAssetNeuralSDESample,
     SyntheticCorrelatedGBMDataset,
+    _fib_features_multi,
+    _min_max_normalize_multi,
 )
 from amgm.models.mlp_multi import NeuralSDEMoEMultiAsset
 import amgm.utils.common as common
@@ -268,10 +271,10 @@ from amgm.models.neural_SDE.multi_runner import MultiAssetNeuralSDERunner
 GBM_DT = 1.0 / 252.0
 
 
-def _make_runner(n_assets=4, corr_init=None):
+def _make_runner(n_assets=4, corr_init=None, lookback=LOOKBACK):
     model_cfg = dict(
         _target_=NeuralSDEMoEMultiAsset,
-        lookback_window=LOOKBACK,
+        lookback_window=lookback,
         n_assets=n_assets,
         num_features=FIB_NUM_LEVELS,
         hidden_sizes=[32, 16],
@@ -438,3 +441,156 @@ def test_trainer_cfg_modules_build():
         assert cfg["model_cfg"]["num_features"] == FIB_NUM_LEVELS
         assert cfg["model_cfg"]["lookback_window"] == cfg["dset_cfg"]["lookback_window"]
         assert "corr_init" in cfg["model_cfg"] and "n_assets" in cfg["model_cfg"]
+
+
+# ---------------------------------------------------------------------------
+# Phase 5: correlated MC generation + Member 4 artifacts
+# ---------------------------------------------------------------------------
+
+import importlib.util
+
+_gen_spec = importlib.util.spec_from_file_location(
+    "generate_samples_multi",
+    Path(__file__).resolve().parents[1] / "experiments" / "neural_SDE" / "generate_samples_multi.py",
+)
+gen_multi = importlib.util.module_from_spec(_gen_spec)
+_gen_spec.loader.exec_module(gen_multi)
+
+
+class _FakeMultiDataset:
+    """Minimal basket dataset with the calendar interface the generator needs.
+
+    Builds windows exactly like MultiAssetNeuralSDEDataset but from an in-memory
+    correlated GBM, so tests don't touch the real AM data or BaseAMData.
+    """
+
+    def __init__(self, n_assets=3, n_days=220, lookback=40, rho=0.5, seed=0):
+        rng = np.random.default_rng(seed)
+        corr = _equicorr(n_assets, rho)
+        chol = np.linalg.cholesky(corr)
+        rets = rng.standard_normal((n_days, n_assets)) @ chol.T * 0.01
+        prices = (100 * np.exp(np.cumsum(rets, axis=0))).astype(np.float32)
+        self.prices_aligned = prices
+        self.dates = pd.bdate_range("2020-01-01", periods=n_days).strftime("%Y-%m-%d").tolist()
+        self.n_assets = n_assets
+        self.basket_issue_ids = [f"asset{i}" for i in range(n_assets)]
+        self.lookback = lookback
+        self.true_corr = corr.astype(np.float32)
+
+        starts = np.arange(0, n_days - lookback)
+        pw = np.stack([prices[s : s + lookback] for s in starts])
+        nxt = np.stack([prices[s + lookback] for s in starts])
+        norm_windows, norm_nxt, sample_min, sample_range = _min_max_normalize_multi(pw, nxt)
+        features, fib_levels = _fib_features_multi(norm_windows)
+        self.price_window = torch.from_numpy(norm_windows)
+        self.sample_min = torch.from_numpy(sample_min)
+        self.sample_range = torch.from_numpy(sample_range)
+        self.features = torch.from_numpy(features)
+        self.fib_levels = torch.from_numpy(fib_levels)
+        self.test_dates = [self.dates[s + lookback - 1] for s in starts]
+
+    def __len__(self):
+        return len(self.test_dates)
+
+    def __getitem__(self, idx):
+        return MultiAssetNeuralSDESample(
+            price_window=self.price_window[idx],
+            nxt_price=torch.zeros(self.n_assets),  # not used by the generator
+            sample_min=self.sample_min[idx],
+            sample_range=self.sample_range[idx],
+            features=self.features[idx],
+            fib_levels=self.fib_levels[idx],
+            test_dates=self.test_dates[idx],
+            issue_ids=self.basket_issue_ids,
+        )
+
+
+def test_rollout_recovers_known_correlation():
+    n_assets, rho = 4, 0.5
+    ds = _FakeMultiDataset(n_assets=n_assets, rho=rho)
+    model = NeuralSDEMoEMultiAsset(
+        lookback_window=ds.lookback,
+        n_assets=n_assets,
+        hidden_sizes=[32, 16],
+        corr_init=torch.as_tensor(ds.true_corr),
+    )
+    model.eval()
+
+    # 8 origins x 50 MC paths = 400 rollouts, all in original price scale
+    seed_windows = torch.from_numpy(
+        np.stack(
+            [
+                (ds[i].price_window * ds[i].sample_range.unsqueeze(0) + ds[i].sample_min.unsqueeze(0)).numpy()
+                for i in range(8)
+            ]
+        )
+    ).float()
+    batch = {"price_window_original": seed_windows.repeat_interleave(50, dim=0)}
+
+    paths, pi = gen_multi._rollout_sde_multi(model, batch, n_steps=40, dt=1.0 / 252.0, seed=1)
+    assert paths.shape == (400, 41, n_assets)
+    assert pi.shape == (400, 40, n_assets, 3)
+    assert np.isfinite(paths).all()
+    assert (paths > 0).all()
+
+    # The correlated noise (chol_sigma @ z) must imprint R on the rollout returns,
+    # even with untrained drift/diffusion heads (drift is O(dt), noise is O(sqrt(dt))).
+    rets = gen_multi._daily_returns(paths).reshape(-1, n_assets)
+    est = np.corrcoef(rets, rowvar=False)
+    off_diag = ~np.eye(n_assets, dtype=bool)
+    assert np.abs(est[off_diag] - rho).mean() < 0.1
+
+
+def test_generation_writes_member4_artifacts(tmp_path):
+    n_assets, lookback = 3, 30
+    ds = _FakeMultiDataset(n_assets=n_assets, n_days=120, lookback=lookback, rho=0.4, seed=2)
+    runner = _make_runner(n_assets=n_assets, corr_init=ds.true_corr, lookback=lookback)
+
+    # Checkpoint round-trip through the same loader the CLI uses
+    ckpt_path = tmp_path / "model.ckpt"
+    torch.save({"hyper_parameters": dict(runner.hparams), "state_dict": runner.state_dict()}, ckpt_path)
+
+    n_cond, mc, steps = 2, 4, 15
+    out_dir = tmp_path / "plots"
+    gen_multi.main_mc_multi_asset(
+        dict(run_cfg=dict(rng_seed=5), dset_cfg=dict(dt=1.0)),
+        checkpoint_path=ckpt_path,
+        n_conditions=n_cond,
+        mc_paths=mc,
+        n_steps=steps,
+        output_dir=out_dir,
+        dataset=ds,
+        artifacts_dir=tmp_path,
+    )
+
+    npz = np.load(tmp_path / "synthetic_rollout_MC_multi_valid_samples.npz")
+    assert npz["synthetic_paths"].shape == (n_cond * mc, steps + 1, n_assets)
+    assert npz["seed_windows"].shape == (n_cond, lookback, n_assets)
+    assert npz["original_prices"].shape == (n_cond, steps + 1, n_assets)
+    assert npz["fib_levels"].shape == (n_cond, n_assets, FIB_NUM_LEVELS)
+    assert npz["corr_matrix"].shape == (n_assets, n_assets)
+    assert npz["is_valid"].dtype == bool and len(npz["is_valid"]) == n_cond * mc
+    assert list(npz["basket_issue_ids"]) == ds.basket_issue_ids
+    assert len(npz["test_dates"]) == n_cond
+    assert np.isfinite(npz["synthetic_paths"]).all()
+
+    # Seed windows are in original scale and match the aligned price matrix
+    first_date_idx = ds.dates.index(str(npz["test_dates"][0]))
+    np.testing.assert_allclose(
+        npz["seed_windows"][0],
+        ds.prices_aligned[first_date_idx - lookback + 1 : first_date_idx + 1],
+        rtol=1e-5,
+    )
+
+    csv = pd.read_csv(tmp_path / "synthetic_rollout_paths_MultiMoE.csv")
+    expected_cols = {
+        "IssueId", "SourceIssueId", "AssetIdx", "TestDate", "PathId",
+        "MCIteration", "MasterSeed", "IsValid", "Date", "ClAdjLoc",
+    }
+    assert expected_cols <= set(csv.columns)
+    assert len(csv) == n_cond * mc * n_assets * (steps + 1)
+    assert csv["AssetIdx"].nunique() == n_assets
+    assert csv["PathId"].nunique() == n_cond * mc
+
+    assert (tmp_path / "correlation_sanity_multi.png").exists()
+    assert len(list(out_dir.glob("synthetic_rollout_multi_*_MC.png"))) == n_cond
