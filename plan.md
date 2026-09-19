@@ -39,6 +39,11 @@ Here is the complete blueprint of your project, combining the baseline architect
 
 * **Member 4 (Multivariate Evaluation):** Replaces the standard 1D histograms with entirely new evaluation metrics. They will design statistical tests to prove your $N$-dimensional synthetic data accurately preserves real-world stock correlations.
 
+> **Update (post meeting 2):** Alireza has structured the Member 3+4 work as six experiments
+> (dependency analysis → features → joint architecture → marginal realism → cross-asset
+> evaluation → portfolio evaluation). The detailed working plan, including the mapping to
+> the already-implemented multi-asset pipeline, is in [plan-member3-4-experiments.md](plan-member3-4-experiments.md).
+
 
 
 You are member 3:
