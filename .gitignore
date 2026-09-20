@@ -3,6 +3,9 @@ Data/*
 !Data/Synthetic/**
 !Data/data-20250505/
 !Data/data-20250505/**
+# 17.8 MB generated convenience export; the committed NPZ holds the same paths.
+# Regenerate with: python experiments/neural_SDE/generate_samples_multi.py --trainer_cfg US_Stocks_Multi --seed 42
+Data/Synthetic/synthetic_rollout_paths_MultiMoE.csv
 
 workspace/linear_trend/
 workspace/linear_trend/**
