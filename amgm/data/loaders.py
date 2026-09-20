@@ -187,6 +187,9 @@ def make_loader(
     if data_source == "local" and training_data_type == "US_Stocks":
         return USStocksLoader(dset_path)
 
+    elif data_source == "local" and training_data_type == "US_Stocks_Multi":
+        return USStocksLoader(dset_path)
+
     elif data_source == "local" and training_data_type == "RX1":
         return RX1Loader(dset_path)
 

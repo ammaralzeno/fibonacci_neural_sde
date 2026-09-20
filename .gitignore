@@ -3,6 +3,8 @@ Data/*
 !Data/Synthetic/**
 !Data/data-20250505/
 !Data/data-20250505/**
+# Generated convenience export (17.8 MB); regenerate via generate_samples_multi.py --trainer_cfg US_Stocks_Multi --seed 42
+Data/Synthetic/synthetic_rollout_paths_MultiMoE.csv
 
 workspace/linear_trend/
 workspace/linear_trend/**
@@ -192,3 +194,5 @@ cython_debug/
 amgm/data/data-20250505
 
 *.pt
+# Local data loader cache (created by load_sebx_am_data)
+Data/**/cache.pkl

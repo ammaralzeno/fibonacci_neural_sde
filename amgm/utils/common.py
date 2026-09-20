@@ -749,6 +749,57 @@ def evaluate_residual_calibration(predictions, dset_cfg):
 
     return metrics
 
+def evaluate_multivariate_residual_calibration(predictions, dset_cfg):
+    """ Compute whitened multivariate residuals using the predicted Cholesky factor:
+    z_t = (L_t * sqrt(dt))^-1 * (x_{t+1} - x_t - drift_t * dt),  L_t = chol_sigma_t
+
+    If the joint Gaussian model is well calibrated, z_t ~ N(0, I): zero mean,
+    unit variance, and near-zero cross-correlation between components.
+    """
+    if not predictions:
+        return None
+    if "chol_sigma" not in predictions[0]:
+        return None
+
+    dt = float(dset_cfg.get("dt", 1.0))
+    sqrt_dt = dt ** 0.5
+    eps = 1e-8
+
+    x_t = torch.cat([batch["x_t"] for batch in predictions], dim=0)
+    x_tp1 = torch.cat([batch["x_tp1"] for batch in predictions], dim=0)
+    drift = torch.cat([batch["drift"] for batch in predictions], dim=0)
+    chol_sigma = torch.cat([batch["chol_sigma"] for batch in predictions], dim=0)
+
+    n_samples, n_assets = x_t.shape
+    print(f"Evaluating multivariate residual calibration on {n_samples} samples x {n_assets} assets.")
+
+    L = chol_sigma * sqrt_dt + eps * torch.eye(n_assets)
+    dx = (x_tp1 - x_t - drift * dt).unsqueeze(-1)                       # (n_samples, n_assets, 1)
+    z = torch.linalg.solve_triangular(L, dx, upper=False).squeeze(-1)  # (n_samples, n_assets)
+
+    metrics = {
+        "n_residuals": int(z.numel()),
+        "z_mean": z.mean().item(),
+        "z_std": z.std(unbiased=False).item(),
+        "coverage_1sigma": (z.abs() <= 1.0).float().mean().item(),
+        "coverage_2sigma": (z.abs() <= 2.0).float().mean().item(),
+        "coverage_3sigma": (z.abs() <= 3.0).float().mean().item(),
+        "coverage_1sigma_target": 0.682689,
+        "coverage_2sigma_target": 0.954500,
+        "coverage_3sigma_target": 0.997300,
+    }
+
+    if n_samples > 1 and n_assets > 1:
+        z_corr = torch.corrcoef(z.T)  # (n_assets, n_assets), rows are variables
+        off_diag = z_corr[~torch.eye(n_assets, dtype=bool)]
+        metrics["z_cross_corr_abs_mean"] = off_diag.abs().mean().item()
+        metrics["z_cross_corr_abs_max"] = off_diag.abs().max().item()
+    else:
+        metrics["z_cross_corr_abs_mean"] = None
+        metrics["z_cross_corr_abs_max"] = None
+
+    return metrics
+
 def print_dict(d):
     for key, value in d.items():
         if value is None:

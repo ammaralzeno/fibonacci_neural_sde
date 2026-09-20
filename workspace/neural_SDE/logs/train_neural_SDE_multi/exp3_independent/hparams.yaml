@@ -1,0 +1,74 @@
+acc_cfg:
+  _target_: !!python/name:torchmetrics.regression.mae.MeanAbsoluteError ''
+compile_model: false
+dset_cfg:
+  data_source: local
+  dset_path: !!python/object/apply:pathlib.PosixPath
+  - /
+  - workspace
+  - Data
+  - data-20250505
+  dt: 1.0
+  end_date: '2017-12-31'
+  issue_ids: []
+  lookback_window: 252
+  max_windows: null
+  n_assets: 5
+  price_value_col: ClAdjLoc
+  start_date: '2014-12-31'
+  training_data_type: US_Stocks_Multi
+entropy_beta: 0.1
+entropy_beta_decay_steps: 800
+entropy_beta_min: 0.01
+entropy_beta_warmup_steps: 200
+expert_balance_lambda: 0
+loss_cfg:
+  _target_: torch.nn.modules.loss.MSELoss
+model_cfg:
+  _target_: amgm.models.mlp_multi.NeuralSDEMoEMultiAsset
+  corr_init:
+  - - 1.0
+    - 0.2376333624124527
+    - 0.09029515087604523
+    - -0.08123493194580078
+    - 0.20515842735767365
+  - - 0.2376333624124527
+    - 1.0
+    - -0.027733290567994118
+    - -0.055371176451444626
+    - 0.09271743148565292
+  - - 0.09029515087604523
+    - -0.027733290567994118
+    - 1.0
+    - 0.06832390278577805
+    - 0.04153097793459892
+  - - -0.08123493194580078
+    - -0.055371176451444626
+    - 0.06832390278577805
+    - 1.0
+    - -0.10469337552785873
+  - - 0.20515842735767365
+    - 0.09271743148565292
+    - 0.04153097793459892
+    - -0.10469337552785873
+    - 1.0
+  hidden_sizes:
+  - 32
+  - 16
+  learn_corr: false
+  lookback_window: 252
+  n_assets: 5
+  num_features: 7
+  use_context: false
+optim_cfg:
+  _target_: torch.optim.adam.Adam
+  lr: 0.001
+  weight_decay: 1.0e-05
+run_cfg:
+  batch_size: 64
+  max_epochs: 20
+  num_workers: 0
+  rng_seed: 42
+  run_idx: 1
+  run_name: exp3_independent
+sched_cfg: null
