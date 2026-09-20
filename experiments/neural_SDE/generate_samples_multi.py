@@ -14,53 +14,21 @@ from amgm import config as amgm_config
 from amgm.data.neural_SDE_multi import MultiAssetNeuralSDEDataset, _fib_features_multi
 from amgm.models.neural_SDE.multi_runner import MultiAssetNeuralSDERunner
 import amgm.utils.common as common
-
-# For parallel run is necessary otherwise, torch will overload each vCPU
-# torch.set_num_threads(1)          # limit PyTorch to 1 thread for intra-op parallelism
-# torch.set_num_interop_threads(1)  # limit inter-op parallelism to 1 thread
-torch.set_num_threads(16)
-try:
-    torch.set_num_interop_threads(2)  # one-shot: raises if parallel work already started
-except RuntimeError:
-    pass  # e.g. when imported into a process that already ran torch ops (tests)
-
-def _resolve_seed(seed_value):
-    if seed_value in (None, "random"):
-        return torch.seed() % (2**31 - 1)  
-    return int(seed_value)
+from experiments.neural_SDE.train_neural_SDE import _resolve_seed
 
 
 def _load_multi_checkpoint(checkpoint_path):
-    """Load a MultiAssetNeuralSDERunner checkpoint (stripping torch.compile prefixes)."""
+    """Load a MultiAssetNeuralSDERunner checkpoint (never torch.compile'd)."""
     checkpoint_path = str(Path(checkpoint_path).expanduser())
-    checkpoint = torch.load(
-        checkpoint_path,
-        map_location="cpu",
-        weights_only=False,
-    )
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     hparams = checkpoint.get("hyper_parameters")
     if not isinstance(hparams, dict):
         raise RuntimeError("Cannot load checkpoint without hyper_parameters.")
 
     hparams = dict(hparams)
-    hparams["compile_model"] = False  # never compile when loading for generation
+    hparams["compile_model"] = False
     model = MultiAssetNeuralSDERunner(**hparams)
-    state_dict = checkpoint.get("state_dict", {})
-    if not isinstance(state_dict, dict):
-        raise RuntimeError("Checkpoint state_dict is missing or invalid.")
-
-    migrated_state = {}
-    for key, value in state_dict.items():
-        migrated_key = key
-        if migrated_key.startswith("model._orig_mod."):
-            migrated_key = migrated_key.replace("model._orig_mod.", "model.", 1)
-        migrated_state[migrated_key] = value
-
-    model.load_state_dict(migrated_state, strict=True)
-    if any(key.startswith("model._orig_mod.") for key in state_dict):
-        logging.warning(
-            "Loaded compiled checkpoint after stripping model._orig_mod.* prefixes."
-        )
+    model.load_state_dict(checkpoint["state_dict"], strict=True)
     return model
 
 
@@ -73,17 +41,11 @@ def _compute_min_range_multi(x_window):
 
 
 def _rollout_sde_multi(model, batch, n_steps, dt, seed):
-    """Correlated Monte Carlo rollout of the joint SDE.
+    """Correlated MC rollout: x_{t+1} = x_t + mu*dt + (chol_sigma @ z)*sqrt(dt), z ~ N(0, I_N).
 
-    x_{t+1} = x_t + mu * dt + (chol_sigma @ z) * sqrt(dt),  z ~ N(0, I_N)
-
-    where chol_sigma is the model's Cholesky factor of Sigma_t = diag(sigma_t) R diag(sigma_t),
-    so each step samples correlated noise across the N assets. The rolling window is
-    re-normalized per asset before every inference, matching training-time preprocessing.
-
-    Returns:
-        synthetic_paths: (batch, n_steps + 1, N) in original price scale
-        pi_paths:        (batch, n_steps, N, 3) gate probabilities along the path
+    The rolling window is re-normalized per asset before every inference, matching
+    training-time preprocessing. Returns (batch, n_steps+1, N) original-scale paths
+    and (batch, n_steps, N, 3) gate probabilities.
     """
     gen = torch.Generator().manual_seed(int(seed))
 
@@ -94,7 +56,6 @@ def _rollout_sde_multi(model, batch, n_steps, dt, seed):
     pi_path = []
     with torch.no_grad():
         for step_idx in range(n_steps):
-            # Re-normalize each rolling window per asset before inference, matching training-time preprocessing.
             x_min, x_range = _compute_min_range_multi(x_window_original)
             x_window = (x_window_original - x_min) / x_range
 
@@ -211,32 +172,23 @@ def main_mc_multi_asset(
     n_steps,
     output_dir,
     seed_override=None,
-    dataset=None,
-    artifacts_dir=None,
 ):
     """Generate correlated MC rollouts for several forecast origins of the basket.
 
-    Artifacts (schema agreed with Member 4):
-      - Data/Synthetic/synthetic_rollout_MC_multi_valid_samples.npz
-      - Data/Synthetic/synthetic_rollout_paths_MultiMoE.csv
-      - Data/Synthetic/correlation_sanity_multi.png
-
-    dataset/artifacts_dir are injectable for testing; defaults build the real
-    dataset from trainer_cfg and write to Data/Synthetic.
+    Artifacts (Member 4 schema) in Data/Synthetic: NPZ of all paths + inputs,
+    long-format paths CSV, and the real-vs-synthetic correlation sanity plot.
     """
     if n_conditions <= 0 or mc_paths <= 0:
         raise ValueError("n_conditions and mc_paths must be positive.")
 
     run_cfg = trainer_cfg["run_cfg"]
     dset_cfg = dict(trainer_cfg["dset_cfg"])
-    dset_cfg["max_windows"] = None  # Do not truncate windows; origins are subsampled afterwards.
+    dset_cfg["max_windows"] = None  # origins are subsampled afterwards
 
     configured_seed = seed_override if seed_override is not None else run_cfg.get("rng_seed")
     seed = _resolve_seed(configured_seed)
     seed_everything(seed, workers=True)
-
-    if dataset is None:
-        dataset = MultiAssetNeuralSDEDataset(**dset_cfg, rng_seed=seed)
+    dataset = MultiAssetNeuralSDEDataset(**dset_cfg, rng_seed=seed)
     n_assets = dataset.n_assets
     basket = dataset.basket_issue_ids
 
@@ -295,13 +247,10 @@ def main_mc_multi_asset(
         ]
     ).astype(np.float32)  # (n_conditions, N, 7)
 
-    raw_model = getattr(model.model, "_orig_mod", model.model)  # unwrap torch.compile if present
-    learned_corr = raw_model.correlation_matrix().detach().cpu().numpy().astype(np.float32)
+    learned_corr = model.model.correlation_matrix().detach().cpu().numpy().astype(np.float32)
 
-    # ---------------- NPZ artifact (Member 4 schema) ----------------
-    if artifacts_dir is None:
-        artifacts_dir = Path(__file__).resolve().parents[2] / "Data" / "Synthetic"
-    synthetic_artifacts_dir = Path(artifacts_dir)
+    # NPZ artifact (Member 4 schema)
+    synthetic_artifacts_dir = Path(__file__).resolve().parents[2] / "Data" / "Synthetic"
     synthetic_artifacts_dir.mkdir(parents=True, exist_ok=True)
     artifacts_file = synthetic_artifacts_dir / "synthetic_rollout_MC_multi_valid_samples.npz"
     np.savez_compressed(
@@ -317,36 +266,33 @@ def main_mc_multi_asset(
         master_seed=np.asarray([int(seed)], dtype=np.int64),
     )
 
-    # ---------------- CSV artifact (long format, Member 4 schema) ----------------
-    frames = []
-    for cond_idx, test_date in enumerate(test_dates):
-        dates = pd.bdate_range(start=pd.Timestamp(test_date), periods=n_steps + 1)
-        for iteration in range(mc_paths):
-            path_idx = cond_idx * mc_paths + iteration
-            for a in range(n_assets):
-                frames.append(
-                    pd.DataFrame(
-                        {
-                            "IssueId": [
-                                f"{basket[a]}_synthetic_MC_{cond_idx:04d}_{iteration:03d}"
-                            ]
-                            * (n_steps + 1),
-                            "SourceIssueId": [str(basket[a])] * (n_steps + 1),
-                            "AssetIdx": [a] * (n_steps + 1),
-                            "TestDate": [test_date] * (n_steps + 1),
-                            "PathId": [path_idx] * (n_steps + 1),
-                            "MCIteration": [iteration] * (n_steps + 1),
-                            "MasterSeed": [int(seed)] * (n_steps + 1),
-                            "IsValid": [bool(is_valid[path_idx])] * (n_steps + 1),
-                            "Date": dates,
-                            "ClAdjLoc": synthetic_paths[path_idx, :, a],
-                        }
-                    )
-                )
+    # CSV artifact (long format, one row per asset per day per path)
+    c_idx, m_idx, a_idx = np.indices((len(test_dates), mc_paths, n_assets)).reshape(3, -1)
+    path_idx = c_idx * mc_paths + m_idx
+    n_rows = n_steps + 1
+    frame = pd.DataFrame(
+        {
+            "IssueId": np.repeat(
+                [f"{basket[a]}_synthetic_MC_{c:04d}_{m:03d}" for c, m, a in zip(c_idx, m_idx, a_idx)],
+                n_rows,
+            ),
+            "SourceIssueId": np.repeat([str(basket[a]) for a in a_idx], n_rows),
+            "AssetIdx": np.repeat(a_idx, n_rows),
+            "TestDate": np.repeat([test_dates[c] for c in c_idx], n_rows),
+            "PathId": np.repeat(path_idx, n_rows),
+            "MCIteration": np.repeat(m_idx, n_rows),
+            "MasterSeed": int(seed),
+            "IsValid": np.repeat(is_valid[path_idx], n_rows),
+            "Date": np.concatenate(
+                [np.tile(pd.bdate_range(start=pd.Timestamp(td), periods=n_rows), mc_paths * n_assets) for td in test_dates]
+            ),
+            "ClAdjLoc": synthetic_paths[path_idx, :, a_idx].reshape(-1),
+        }
+    )
     synthetic_output_file = synthetic_artifacts_dir / "synthetic_rollout_paths_MultiMoE.csv"
-    pd.concat(frames, ignore_index=True).to_csv(synthetic_output_file, index=False)
+    frame.to_csv(synthetic_output_file, index=False)
 
-    # ---------------- Correlation sanity plot ----------------
+    # Correlation sanity plot
     real_corr = np.corrcoef(_daily_returns(dataset.prices_aligned), rowvar=False).astype(np.float32)
     valid_paths = synthetic_paths[is_valid] if is_valid.any() else synthetic_paths
     synth_returns = _daily_returns(valid_paths).reshape(-1, n_assets)
@@ -354,7 +300,7 @@ def main_mc_multi_asset(
     corr_plot_file = synthetic_artifacts_dir / "correlation_sanity_multi.png"
     mae = _plot_correlation_sanity(real_corr, synth_corr, corr_plot_file, basket)
 
-    # ---------------- One ensemble figure per forecast origin ----------------
+    # One ensemble figure per forecast origin
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     for cond_idx, test_date in enumerate(test_dates):

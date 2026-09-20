@@ -1,15 +1,4 @@
-"""Multi-asset datasets for the joint (portfolio) Neural SDE.
-
-Sample schema (shared by both dataset classes in this module):
-    price_window: (lookback_window, N)  per-asset min-max normalized prices
-    nxt_price:    (N,)                  next-day prices, same normalization
-    sample_min:   (N,)                  per-asset window minimum
-    sample_range: (N,)                  per-asset window range (max - min)
-    features:     (N, 7)                normalized signed distances to Fibonacci levels
-    fib_levels:   (N, 7)                Fibonacci levels in normalized space
-    test_dates:   str                   window-end date (last day of the window)
-    issue_ids:    list[str]             basket asset IDs, order matching axis 1/0
-"""
+"""Multi-asset datasets for the joint (portfolio) Neural SDE."""
 
 from typing import Any, NamedTuple, Optional
 
@@ -28,6 +17,8 @@ FIB_NUM_LEVELS = 7
 
 
 class MultiAssetNeuralSDESample(NamedTuple):
+    """price_window (w, N), nxt_price/sample_min/sample_range (N,), features/fib_levels (N, 7)."""
+
     price_window: torch.Tensor
     nxt_price: torch.Tensor
     sample_min: torch.Tensor
@@ -67,11 +58,7 @@ def _fib_features_multi(norm_windows: np.ndarray):
 
 
 def _increment_correlation(norm_windows: np.ndarray, norm_nxt: np.ndarray) -> np.ndarray:
-    """Correlation of normalized one-step increments dx = x_{t+1} - x_t across samples.
-
-    This is the quantity the multivariate NLL sees during training, so it is the
-    natural initialization for the model's correlation matrix.
-    """
+    """Correlation of normalized one-step increments dx = x_{t+1} - x_t; the natural init for the model's R."""
     dx = norm_nxt - norm_windows[:, -1, :]
     corr = np.corrcoef(dx, rowvar=False)
     corr = np.nan_to_num(corr, nan=0.0)

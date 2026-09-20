@@ -1,13 +1,9 @@
 """Experiment 2: multi-asset Fibonacci feature analysis.
 
 Extends the single-asset Fibonacci representation to the aligned basket and checks:
-  (a) Fibonacci levels are meaningful independently for each asset;
-  (b) different assets reach Fibonacci levels simultaneously;
-  (c) Fibonacci events in one asset coincide with movements in another.
-
-Figures and a slide-ready findings markdown are written to the output dir.
-All analysis functions are importable and operate on plain numpy arrays so they
-can be unit-tested without the real dataset.
+(a) levels are meaningful per asset, (b) assets reach levels simultaneously,
+(c) events in one asset coincide with movements in another. Writes figures and a
+slide-ready findings markdown to the output dir.
 """
 
 import argparse
@@ -74,9 +70,7 @@ def near_level_mask(features, eps=PAPER_BAND):
 def next_day_returns(dataset):
     """Real next-day simple returns aligned to each window: (B, N).
 
-    Window s ends at dates[s + w - 1]; the target day is s + w. The last window
-    has no next day in the aligned calendar and is dropped (NaN row removed by
-    callers via np.isfinite where needed).
+    Window s ends at dates[s + w - 1]; the target day is s + w.
     """
     prices = dataset.prices_aligned
     w = dataset.lookback_window
@@ -149,11 +143,7 @@ def conditional_returns(mask, rets):
             uncond = uncond[np.isfinite(uncond)]
             stats = {
                 "n_cond": int(cond.size),
-                "mean_cond": float(cond.mean()) if cond.size else np.nan,
-                "std_cond": float(cond.std()) if cond.size else np.nan,
                 "mean_abs_cond": float(np.abs(cond).mean()) if cond.size else np.nan,
-                "mean_uncond": float(uncond.mean()) if uncond.size else np.nan,
-                "std_uncond": float(uncond.std()) if uncond.size else np.nan,
                 "mean_abs_uncond": float(np.abs(uncond).mean()) if uncond.size else np.nan,
                 "ks_stat": np.nan,
                 "ks_p": np.nan,
@@ -381,7 +371,7 @@ def plot_conditional_returns(cond_stats, basket, output_heatmap, output_overlays
     fig.tight_layout()
     fig.savefig(output_overlays, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    return [(basket[a], basket[b], float(k)) for k, (a, b) in ranked]
+    return [(a, b, float(k)) for k, (a, b) in ranked]
 
 
 # ---------------------------------------------------------------------------
@@ -429,10 +419,10 @@ def write_findings(output_dir, basket, dates, mask, cooc, xcorr_summary, fsm_cou
         "",
         "Ordered pairs (A near level -> B's next-day returns), top KS statistic pairs:",
     ]
-    for a_name, b_name, ks_val in top_pairs:
-        s = next(s for (aa, bb), s in cond_stats.items() if basket[aa] == a_name and basket[bb] == b_name)
+    for a, b, ks_val in top_pairs:
+        s = cond_stats[(a, b)]
         lines.append(
-            f"- {a_name} -> {b_name}: KS={ks_val:.2f} (p={s['ks_p']:.3f}), n={s['n_cond']}, "
+            f"- {basket[a]} -> {basket[b]}: KS={ks_val:.2f} (p={s['ks_p']:.3f}), n={s['n_cond']}, "
             f"mean|ret| {s['mean_abs_cond']:.4f} vs {s['mean_abs_uncond']:.4f} unconditional"
         )
     lines += [
@@ -448,29 +438,13 @@ def write_findings(output_dir, basket, dates, mask, cooc, xcorr_summary, fsm_cou
 
 
 def main_fib_analysis(
-    dataset=None,
+    dataset,
     output_dir=None,
-    n_assets=5,
-    issue_ids=None,
-    start_date="2014-12-31",
-    end_date="2017-12-31",
-    lookback_window=252,
     eps=PAPER_BAND,
     segment_days=252,
     max_lag=10,
-    rng_seed=42,
 ):
     """Run the full Exp 2 analysis and write figures + findings to output_dir."""
-    if dataset is None:
-        dataset = MultiAssetNeuralSDEDataset(
-            issue_ids=issue_ids,
-            n_assets=n_assets,
-            start_date=start_date,
-            end_date=end_date,
-            lookback_window=lookback_window,
-            training_data_type="US_Stocks_Multi",
-            rng_seed=rng_seed,
-        )
     if output_dir is None:
         output_dir = amgm_config.work_dir("neural_SDE") / "logs" / "exp2_fib_analysis"
     output_dir = Path(output_dir)

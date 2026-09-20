@@ -1,17 +1,14 @@
+"""Synthetic multi-asset config: correlated GBM with known equicorrelation R.
+
+The run reports how well the model's learned correlation matrix recovers the
+ground truth (see SyntheticCorrelatedGBMDataset).
+"""
+
 import torch
 from torch import nn
 from torchmetrics import MeanAbsoluteError
 
 from amgm.models.mlp_multi import NeuralSDEMoEMultiAsset
-
-"""Synthetic multi-asset Neural SDE for correlated GBM recovery test.
-
-Simulated process (Euler-Maruyama on log-prices, implemented in SyntheticCorrelatedGBMDataset):
-    dX_i = mu_i * X_i * dt + sigma_i * X_i * (L_R dW)_i,
-
-with equicorrelation R = (1 - rho) * I + rho * 11'. The ground-truth R is known,
-so the run reports how well the model's learned correlation matrix recovers it.
-"""
 
 
 def get_trainer_cfg():

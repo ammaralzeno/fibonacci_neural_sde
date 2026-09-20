@@ -753,13 +753,6 @@ def evaluate_multivariate_residual_calibration(predictions, dset_cfg):
     """ Compute whitened multivariate residuals using the predicted Cholesky factor:
     z_t = (L_t * sqrt(dt))^-1 * (x_{t+1} - x_t - drift_t * dt),  L_t = chol_sigma_t
 
-    where:
-        x_t: observed price vector at time t, (n_assets,)
-        x_{t+1}: observed price vector at time t+1
-        drift_t: predicted drift at time t
-        chol_sigma_t: predicted Cholesky factor of the covariance matrix at time t
-        dt: time step size
-
     If the joint Gaussian model is well calibrated, z_t ~ N(0, I): zero mean,
     unit variance, and near-zero cross-correlation between components.
     """

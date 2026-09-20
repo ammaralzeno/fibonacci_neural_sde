@@ -1,12 +1,8 @@
 """Experiment 3: compare ablation configurations — validation NLL table + convergence.
 
-Reads the per-epoch metrics.csv of each ablation run (written by the CSVLogger in
-train_neural_SDE_multi.py), loads each run's checkpoint for the learned correlation
-matrix, and writes the Exp 3 deliverables to the output dir:
-  - exp3_nll_table.csv: best/final validation NLL per configuration
-  - exp3_convergence.png: validation NLL vs epoch for all configurations
-  - exp3_corr_heatmaps.png: learned correlation matrix per configuration
-  - exp3_findings.md: slide-ready summary (does joint modeling provide value?)
+Reads each run's metrics.csv (CSVLogger) and checkpoint, and writes the Exp 3
+deliverables: exp3_nll_table.csv, exp3_convergence.png, exp3_corr_heatmaps.png,
+exp3_findings.md (does joint modeling provide value?).
 """
 
 import argparse
@@ -87,8 +83,7 @@ def plot_convergence(curves, output_file):
 def load_learned_corr(checkpoint_path):
     """Learned correlation matrix R from a run checkpoint (identity for learn_corr=False)."""
     runner = _load_multi_checkpoint(checkpoint_path)
-    model = getattr(runner.model, "_orig_mod", runner.model)
-    return model.correlation_matrix().detach().cpu().numpy()
+    return runner.model.correlation_matrix().detach().cpu().numpy()
 
 
 def plot_corr_heatmaps(corrs, output_file):

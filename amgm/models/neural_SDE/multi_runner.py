@@ -10,15 +10,10 @@ class MultiAssetNeuralSDERunner(NeuralSDERunner):
 
     Same training loop and MoE regularizers as the single-asset baseline; only
     the batch shapes and the step NLL change: the one-step transition is a
-    multivariate Gaussian, N(x_t + mu*dt, Sigma_t*dt), evaluated through the
-    Cholesky factor L_t = chol(Sigma_t) * sqrt(dt) with triangular solves.
+    multivariate Gaussian evaluated through L_t = chol(Sigma_t) * sqrt(dt).
 
-    Batch tensors:
-        price_window: (batch, lookback_window, N)
-        nxt_price:    (batch, N)
-        features:     (batch, N, 7)
-        fib_levels:   (batch, N, 7)
-    Model returns: mu (batch, N), chol_sigma (batch, N, N), pi (batch, N, 3).
+    Batch: price_window (batch, w, N), nxt_price (batch, N), features (batch, N, 7).
+    Model returns mu (batch, N), chol_sigma (batch, N, N), pi (batch, N, 3).
     """
 
     def _prepare_batch(self, batch):
@@ -58,20 +53,16 @@ class MultiAssetNeuralSDERunner(NeuralSDERunner):
         mu, chol_sigma, pi = self.forward(x_window, f_t)
         sde_loss = self._step_nll(x_t, x_tp1, mu, chol_sigma)
 
-        # Same regularizers as the baseline, applied to the gates flattened over
-        # assets: pi (batch, N, 3) -> (batch * N, 3)
+        # Same MoE regularizers as the baseline, on gates flattened over assets
         pi_flat = pi.reshape(-1, pi.shape[-1])
 
-        # Calculate Categorical Entropy per sample: H(pi) = - \sum pi_i * log(pi_i + eps)
         entropy_per_sample = -torch.sum(pi_flat * torch.log(pi_flat + 1e-8), dim=-1)
         mean_entropy = torch.mean(entropy_per_sample)
 
-        f_m = torch.mean(pi_flat, dim=0)  # Average utilization of each expert across the batch
-        # CV Loss: 0 when f_m = [1/3, 1/3, 1/3], scales gracefully as load unbalances
+        f_m = torch.mean(pi_flat, dim=0)
         balance_loss = torch.sum((f_m - (1.0 / 3.0)) ** 2)
         pi_var_per_expert = torch.var(pi_flat, dim=0, unbiased=False)
         mean_pi_var = torch.mean(pi_var_per_expert)
-        # Total Loss: Penalize low entropy to prevent premature expert collapse
         beta = self.entropy_beta if entropy_beta is None else float(entropy_beta)
         entropy_term = beta * mean_entropy
         balance_term = self.expert_balance_lambda * balance_loss
@@ -105,8 +96,7 @@ class MultiAssetNeuralSDERunner(NeuralSDERunner):
 
     def on_train_epoch_end(self):
         # Track the learned correlation structure once per epoch
-        model = getattr(self.model, "_orig_mod", self.model)  # unwrap torch.compile if present
-        corr = model.correlation_matrix()
+        corr = self.model.correlation_matrix()
         off_diag = corr - torch.diag_embed(corr.diagonal())
         self.log("train/corr_offdiag_abs_mean", off_diag.abs().mean(), prog_bar=False, on_step=False, on_epoch=True)
         self.log("train/corr_offdiag_abs_max", off_diag.abs().max(), prog_bar=False, on_step=False, on_epoch=True)
