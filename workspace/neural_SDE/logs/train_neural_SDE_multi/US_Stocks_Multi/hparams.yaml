@@ -64,7 +64,7 @@ model_cfg:
   lookback_window: 252
   n_assets: 5
   num_features: 7
-  use_context: false
+  use_context: true
 optim_cfg:
   _target_: torch.optim.adam.Adam
   lr: 0.001
@@ -75,5 +75,5 @@ run_cfg:
   num_workers: 0
   rng_seed: 42
   run_idx: 1
-  run_name: exp3_corr_only_rel
+  run_name: US_Stocks_Multi
 sched_cfg: null

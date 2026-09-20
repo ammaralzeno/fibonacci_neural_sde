@@ -6,19 +6,22 @@ from amgm import config as amgm_config
 from amgm.models.mlp_multi import NeuralSDEMoEMultiAsset
 
 def get_trainer_cfg():
-    n_assets = 10
+    # Relationship-driven basket: same-sector assets (SectorCode 40), mean pairwise
+    # return corr 0.84 in 2014-2017. Placeholder until Member 4's Exp 1 analysis.
+    basket = ["00674201", "14335601", "13376801", "01272601", "00764701"]
+    n_assets = len(basket)
 
     run_cfg = dict(
         run_idx=1,
         run_name="US_Stocks_Multi",
-        rng_seed=None,  # set an int for reproducible basket sampling; None gives a fresh subset each run
+        rng_seed=42,
         batch_size=64,
         num_workers=0,
         max_epochs=20,
     )
 
     dset_cfg = dict(
-        issue_ids=[],   # explicit basket of IssueIds; if empty, the n_assets assets with the most complete coverage are selected
+        issue_ids=basket,   # explicit basket of IssueIds; if empty, the n_assets assets with the most complete coverage are selected
         n_assets=n_assets,
         start_date="2014-12-31",
         end_date="2017-12-31",

@@ -17,16 +17,11 @@ from amgm import config as amgm_config
 from experiments.neural_SDE.generate_samples_multi import _load_multi_checkpoint
 
 # Configuration name -> (use_context, learn_corr, display label)
-# The *_rel runs repeat the ablation on the relationship-driven basket (exp3_*_rel configs).
 EXP3_CONFIGS = {
     "exp3_independent": (False, False, "Independent (no context, R=I)"),
     "exp3_corr_only": (False, True, "Correlation only"),
     "exp3_context_only": (True, False, "Context only (R=I)"),
     "exp3_full": (True, True, "Full joint (context + R)"),
-    "exp3_independent_rel": (False, False, "Independent (no context, R=I)"),
-    "exp3_corr_only_rel": (False, True, "Correlation only"),
-    "exp3_context_only_rel": (True, False, "Context only (R=I)"),
-    "exp3_full_rel": (True, True, "Full joint (context + R)"),
 }
 
 
@@ -143,10 +138,9 @@ def write_findings(output_dir, table):
         "",
         "Figures: `exp3_convergence.png`, `exp3_corr_heatmaps.png`. Data: `exp3_nll_table.csv`.",
         "",
-        "Caveats: single seed; small sample (~380 train / ~95 val windows). The two Exp 3",
-        "baskets bracket dependency strength: coverage-selected (mean pairwise return corr",
-        "0.08) vs relationship-selected same-sector (0.84) — joint modeling provides value",
-        "only when true cross-asset dependencies exist.",
+        "Caveats: single seed; small sample (~400 train / ~100 val windows). The basket is",
+        "relationship-selected (same sector, mean pairwise return corr 0.84) and may be",
+        "revised after Member 4's Exp 1 dependency analysis.",
     ]
     (Path(output_dir) / "exp3_findings.md").write_text("\n".join(lines) + "\n")
 
