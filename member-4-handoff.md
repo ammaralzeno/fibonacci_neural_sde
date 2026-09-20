@@ -21,11 +21,17 @@
 | `corr_matrix` | float32 | `(N, N)` | The model's learned correlation matrix R |
 | `master_seed` | int64 | `(1,)` | RNG seed for reproducibility |
 
-## Artifact 2: CSV — `Data/Synthetic/synthetic_rollout_paths_MultiMoE.csv`
+## Artifact 2: CSV — `Data/Synthetic/synthetic_rollout_paths_MultiMoE.csv` (generated on demand, not committed)
 
 Long format, one row per asset per day per path. Mirrors the existing single-asset CSVs (`synthetic_rollout_paths_MoE.csv` etc.), so existing loaders keep working:
 
 `IssueId` (synthetic, includes path/iteration), `SourceIssueId` (real asset), `AssetIdx` (0..N-1), `TestDate`, `PathId`, `MCIteration`, `MasterSeed`, `IsValid`, `Date`, `ClAdjLoc`.
+
+**Not in git** (17.8 MB flattened copy of the NPZ — the NPZ above is the canonical committed artifact). Regenerate it (and the NPZ) with:
+
+```bash
+python experiments/neural_SDE/generate_samples_multi.py --trainer_cfg US_Stocks_Multi --seed 42
+```
 
 ## What stays on your side
 
