@@ -75,5 +75,5 @@ run_cfg:
   num_workers: 0
   rng_seed: 42
   run_idx: 1
-  run_name: exp3_full
+  run_name: US_Stocks_Multi
 sched_cfg: null

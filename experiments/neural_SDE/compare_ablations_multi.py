@@ -58,8 +58,9 @@ def build_nll_table(curves):
             }
         )
     table = pd.DataFrame(rows)
-    if "exp3_independent" in curves:
-        base = table.loc[table["config"] == "exp3_independent", "best_val_nll"].iloc[0]
+    indep = table[(table["use_context"] == False) & (table["learn_corr"] == False)]
+    if len(indep):
+        base = indep["best_val_nll"].iloc[0]
         table["delta_vs_independent"] = table["best_val_nll"] - base  # negative = better than independent
     return table
 
@@ -108,8 +109,9 @@ def plot_corr_heatmaps(corrs, output_file):
 
 def write_findings(output_dir, table):
     """Slide-ready Exp 3 findings: NLL table + mechanism attribution."""
-    def nll(name):
-        return float(table.loc[table["config"] == name, "best_val_nll"].iloc[0])
+    def nll(use_context, learn_corr):
+        row = table[(table["use_context"] == use_context) & (table["learn_corr"] == learn_corr)]
+        return float(row["best_val_nll"].iloc[0])
 
     lines = [
         "# Experiment 3 — Joint architecture ablations: findings",
@@ -130,16 +132,15 @@ def write_findings(output_dir, table):
         "",
         "## Mechanism attribution (best val NLL differences, nats)",
         "",
-        f"- Correlation channel: independent -> corr-only = {nll('exp3_corr_only') - nll('exp3_independent'):+.4f}",
-        f"- Context channel: independent -> context-only = {nll('exp3_context_only') - nll('exp3_independent'):+.4f}",
-        f"- Both (full joint): independent -> full = {nll('exp3_full') - nll('exp3_independent'):+.4f}",
+        f"- Correlation channel: independent -> corr-only = {nll(False, True) - nll(False, False):+.4f}",
+        f"- Context channel: independent -> context-only = {nll(True, False) - nll(False, False):+.4f}",
+        f"- Both (full joint): independent -> full = {nll(True, True) - nll(False, False):+.4f}",
         "",
         "Figures: `exp3_convergence.png`, `exp3_corr_heatmaps.png`. Data: `exp3_nll_table.csv`.",
         "",
-        "Caveats: single seed; small sample (380 train / 95 val windows); the basket was",
-        "selected by data coverage, and Exp 2 found near-independent cross-asset level",
-        "simultaneity on it — mechanism values may grow on a relationship-driven basket",
-        "(Member 4's Exp 1).",
+        "Caveats: single seed; small sample (~400 train / ~100 val windows). The basket is",
+        "relationship-selected (same sector, mean pairwise return corr 0.84) and may be",
+        "revised after Member 4's Exp 1 dependency analysis.",
     ]
     (Path(output_dir) / "exp3_findings.md").write_text("\n".join(lines) + "\n")
 
@@ -151,7 +152,7 @@ def main_compare_ablations(log_root=None, output_dir=None, run_names=None):
     if output_dir is None:
         output_dir = amgm_config.work_dir("neural_SDE") / "logs" / "exp3_ablations"
     if run_names is None:
-        run_names = list(EXP3_CONFIGS)
+        run_names = ["exp3_independent", "exp3_corr_only", "exp3_context_only", "exp3_full"]
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -183,5 +184,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--run-names", nargs="*", default=None,
                         help="Run names under the train log dir; defaults to the four exp3_* configurations.")
+    parser.add_argument("--output-dir", default=None,
+                        help="Where to write deliverables; defaults to logs/exp3_ablations.")
     args = parser.parse_args()
-    main_compare_ablations(run_names=args.run_names)
+    main_compare_ablations(run_names=args.run_names, output_dir=args.output_dir)

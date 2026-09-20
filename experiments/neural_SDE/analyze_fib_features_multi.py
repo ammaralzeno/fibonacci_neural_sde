@@ -509,6 +509,7 @@ if __name__ == "__main__":
     parser.add_argument("--eps", type=float, default=PAPER_BAND, help="Near-level band (normalized).")
     parser.add_argument("--segment-days", type=int, default=252, help="Days shown in the simultaneous-levels figure.")
     parser.add_argument("--max-lag", type=int, default=10)
+    parser.add_argument("--output-dir", default=None, help="Defaults to logs/exp2_fib_analysis.")
     args = parser.parse_args()
 
     cfg_path = f"trainer_cfg.neural_SDE.{args.trainer_cfg}"
@@ -517,4 +518,5 @@ if __name__ == "__main__":
     dset_cfg["n_assets"] = args.n_assets
 
     dataset = MultiAssetNeuralSDEDataset(**dset_cfg, rng_seed=42)
-    main_fib_analysis(dataset=dataset, eps=args.eps, segment_days=args.segment_days, max_lag=args.max_lag)
+    main_fib_analysis(dataset=dataset, output_dir=args.output_dir,
+                      eps=args.eps, segment_days=args.segment_days, max_lag=args.max_lag)
