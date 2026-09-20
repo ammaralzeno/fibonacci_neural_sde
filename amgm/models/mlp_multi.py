@@ -6,16 +6,11 @@ from amgm.models.mlp import ExpertHead, GateHead
 
 
 class NeuralSDEMoEMultiAsset(nn.Module):
-    """
-    Multi-asset MoE Neural SDE with the same structural constraints as the
-    single-asset baseline, applied per asset:
-      - Bounce Expert (Elastic restoring force relative to each asset's closest Fib level)
-      - Break Expert (Momentum continuation per asset)
-      - Hover Expert (Bounded drift, low volatility per asset)
-
-    Cross-asset dependence enters through (i) a shared portfolio context vector in
-    every per-asset gate/expert input and (ii) a learned constant correlation
-    matrix R in the diffusion: Sigma_t = diag(sigma_t) R diag(sigma_t).
+    """Multi-asset MoE Neural SDE: the single-asset baseline (Bounce/Break/Hover
+    experts with the same structural constraints) applied per asset, with
+    cross-asset dependence through (i) a shared portfolio context vector in every
+    gate/expert input and (ii) a learned constant correlation matrix R in the
+    diffusion: Sigma_t = diag(sigma_t) R diag(sigma_t).
 
     Expects:
         x_hist: (batch, lookback_window, n_assets)  per-asset normalized price windows
@@ -60,10 +55,8 @@ class NeuralSDEMoEMultiAsset(nn.Module):
         self.sigma_break_head  = ExpertHead(h_dim, hidden_dim=32, out_dim=1)
         self.sigma_hover_head  = ExpertHead(h_dim, hidden_dim=32, out_dim=1)
 
-        # 4. Learned constant correlation: R = L_R L_R^T, where L_R is the
-        #    row-normalized lower-triangular Cholesky factor. Initialized from the
-        #    sample correlation of training increments when provided. With
-        #    learn_corr=False the factor is frozen at the identity (R = I).
+        # 4. Learned constant correlation R = L_R L_R^T (L_R row-normalized), initialized
+        #    from the increment correlation of the training data when provided
         if not learn_corr:
             chol = torch.eye(n_assets)
         elif corr_init is not None:
