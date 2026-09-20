@@ -26,13 +26,17 @@ class NeuralSDEMoEMultiAsset(nn.Module):
         pi:         (batch, n_assets, 3)
     """
 
-    def __init__(self, lookback_window, n_assets, num_features=7, hidden_sizes=(64, 32), gate_temperature=1.0, corr_init=None):
+    def __init__(self, lookback_window, n_assets, num_features=7, hidden_sizes=(64, 32), gate_temperature=1.0, corr_init=None, use_context=True, learn_corr=True):
         super().__init__()
         self.gate_temperature = gate_temperature
 
         self.lookback_window = lookback_window
         self.n_assets = n_assets
         self.num_features = num_features
+        # Ablation flags (Experiment 3): use_context=False removes the portfolio
+        # context from every gate/expert input; learn_corr=False freezes R = I.
+        self.use_context = use_context
+        self.learn_corr = learn_corr
 
         # Shared per-asset encoder tower (same architecture as the single-asset baseline)
         layers = [nn.Linear(lookback_window, hidden_sizes[0]), nn.ReLU()]
@@ -58,13 +62,16 @@ class NeuralSDEMoEMultiAsset(nn.Module):
 
         # 4. Learned constant correlation: R = L_R L_R^T, where L_R is the
         #    row-normalized lower-triangular Cholesky factor. Initialized from the
-        #    sample correlation of training increments when provided.
-        if corr_init is not None:
+        #    sample correlation of training increments when provided. With
+        #    learn_corr=False the factor is frozen at the identity (R = I).
+        if not learn_corr:
+            chol = torch.eye(n_assets)
+        elif corr_init is not None:
             corr = torch.as_tensor(corr_init, dtype=torch.float32)
             chol = self._safe_cholesky(corr)
         else:
             chol = torch.eye(n_assets)
-        self.chol_corr_param = nn.Parameter(chol)
+        self.chol_corr_param = nn.Parameter(chol, requires_grad=learn_corr)
 
     @staticmethod
     def _safe_cholesky(corr):
@@ -120,6 +127,8 @@ class NeuralSDEMoEMultiAsset(nn.Module):
 
         # 2. Portfolio context: mean over assets (permutation-invariant market state)
         context = Z.mean(dim=1, keepdim=True).expand(-1, n_assets, -1)  # (batch, n_assets, hidden_dim)
+        if not self.use_context:
+            context = torch.zeros_like(context)  # ablation: no cross-asset information
 
         # 3. Concatenate latent path vector with instantaneous features and context
         h = torch.cat([Z, f_t, context], dim=-1).reshape(batch * n_assets, -1)  # (batch * n_assets, h_dim)

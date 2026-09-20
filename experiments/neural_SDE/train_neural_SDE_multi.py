@@ -150,6 +150,13 @@ def main(trainer_cfg, save_rollout_plots, model_type):
         save_dir=wdir / "logs",
         version=version,
     )
+    # Persist per-epoch metrics (val/loss, val/loss_sde, ...) to metrics.csv in the
+    # same log dir for the Experiment 3 ablation table and convergence curves.
+    csv_logger = pl_loggers.CSVLogger(
+        save_dir=wdir / "logs",
+        name=Path(__file__).stem,
+        version=version,
+    )
     
     checkpoint_callback = ModelCheckpoint(
             monitor="val/loss",
@@ -182,7 +189,7 @@ def main(trainer_cfg, save_rollout_plots, model_type):
     trainer = Trainer(
         max_epochs=run_cfg["max_epochs"],
         check_val_every_n_epoch=1,
-        logger=False,
+        logger=csv_logger,
         accelerator="cpu",
         callbacks=[checkpoint_callback]
     )

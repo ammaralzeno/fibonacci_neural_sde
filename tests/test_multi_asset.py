@@ -272,7 +272,7 @@ from amgm.models.neural_SDE.multi_runner import MultiAssetNeuralSDERunner
 GBM_DT = 1.0 / 252.0
 
 
-def _make_runner(n_assets=4, corr_init=None, lookback=LOOKBACK):
+def _make_runner(n_assets=4, corr_init=None, lookback=LOOKBACK, **model_overrides):
     model_cfg = dict(
         _target_=NeuralSDEMoEMultiAsset,
         lookback_window=lookback,
@@ -281,6 +281,7 @@ def _make_runner(n_assets=4, corr_init=None, lookback=LOOKBACK):
         hidden_sizes=[32, 16],
         corr_init=corr_init,
     )
+    model_cfg.update(model_overrides)
     return MultiAssetNeuralSDERunner(
         run_cfg=dict(batch_size=64),
         dset_cfg=dict(dt=GBM_DT, eps=1e-6),
@@ -313,6 +314,7 @@ def test_runner_compute_loss_shapes_and_finite():
 
 
 def test_multivariate_nll_prefers_true_correlation():
+    torch.manual_seed(0)  # deterministic model init: the NLL margin depends on it
     syn = SyntheticCorrelatedGBMDataset(
         n_assets=4, lookback_window=LOOKBACK, num_paths=256, steps_per_path=32, rho=0.4, rng_seed=11
     )
@@ -696,3 +698,117 @@ def test_fib_analysis_end_to_end(tmp_path):
     assert "cooccurrence" in out and "conditional" in out
     findings = (tmp_path / "exp2_findings.md").read_text()
     assert "asset0" in findings and "simultaneously" in findings.lower()
+
+
+# ---------------------------------------------------------------------------
+# Experiment 3: ablation flags (use_context / learn_corr)
+# ---------------------------------------------------------------------------
+
+
+def test_ablation_flags_construct_all_combos():
+    for use_context in (True, False):
+        for learn_corr in (True, False):
+            model = NeuralSDEMoEMultiAsset(
+                lookback_window=LOOKBACK, n_assets=3, hidden_sizes=[32, 16],
+                use_context=use_context, learn_corr=learn_corr,
+            )
+            x = torch.randn(4, LOOKBACK, 3)
+            f = torch.randn(4, 3, FIB_NUM_LEVELS) * 0.1
+            mu, chol_sigma, pi = model(x, f)
+            assert mu.shape == (4, 3)
+            assert chol_sigma.shape == (4, 3, 3)
+            assert pi.shape == (4, 3, 3)
+            assert model.chol_corr_param.requires_grad is learn_corr
+
+
+def test_learn_corr_false_keeps_identity_after_training():
+    from lightning import Trainer
+
+    syn = SyntheticCorrelatedGBMDataset(n_assets=3, lookback_window=LOOKBACK, num_paths=16, steps_per_path=8)
+    runner = _make_runner(n_assets=3, corr_init=syn.asset_corr_init, learn_corr=False)
+    loader = DataLoader(syn, batch_size=32)
+    trainer = Trainer(
+        max_epochs=1,
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        accelerator="cpu",
+    )
+    trainer.fit(runner, train_dataloaders=loader, val_dataloaders=loader)
+    assert torch.isfinite(runner.trainer.callback_metrics["val/loss"])
+    # Frozen at identity despite a nonzero data-driven corr_init being passed
+    assert torch.allclose(runner.model.chol_corr_param.data, torch.eye(3))
+    assert torch.allclose(runner.model.correlation_matrix(), torch.eye(3), atol=1e-6)
+
+
+def test_use_context_false_blocks_cross_asset_information():
+    torch.manual_seed(0)
+    n = 3
+    model_off = NeuralSDEMoEMultiAsset(lookback_window=LOOKBACK, n_assets=n, hidden_sizes=[32, 16], use_context=False)
+    model_on = NeuralSDEMoEMultiAsset(lookback_window=LOOKBACK, n_assets=n, hidden_sizes=[32, 16], use_context=True)
+    model_on.load_state_dict(model_off.state_dict())  # identical weights
+    model_off.eval()
+    model_on.eval()
+
+    x = torch.randn(5, LOOKBACK, n)
+    f = torch.randn(5, n, FIB_NUM_LEVELS) * 0.1
+    x2 = x.clone()
+    x2[:, :, 1] = torch.flip(x[:, :, 1], dims=[0])  # scramble asset 1's history
+
+    with torch.no_grad():
+        mu_off_a, _, pi_off_a = model_off(x, f)
+        mu_off_b, _, pi_off_b = model_off(x2, f)
+        mu_on_a, _, _ = model_on(x, f)
+        mu_on_b, _, _ = model_on(x2, f)
+
+    others = [0, 2]
+    # Without context, other assets' outputs are invariant to asset 1's history
+    assert torch.allclose(mu_off_a[:, others], mu_off_b[:, others], atol=1e-6)
+    assert torch.allclose(pi_off_a[:, others], pi_off_b[:, others], atol=1e-6)
+    # With context, they change
+    assert not torch.allclose(mu_on_a[:, 0], mu_on_b[:, 0])
+
+
+def test_nll_with_identity_corr_equals_sum_of_univariate():
+    runner = _make_runner(n_assets=3, corr_init=None, learn_corr=False)
+    model = runner.model
+    x = torch.randn(7, LOOKBACK, 3)
+    f = torch.randn(7, 3, FIB_NUM_LEVELS) * 0.1
+    mu, chol_sigma, _ = model(x, f)
+
+    off_diag = ~torch.eye(3, dtype=bool)
+    assert torch.allclose(chol_sigma[:, off_diag], torch.zeros(7, 6))  # R = I -> diagonal
+
+    x_t = x[:, -1, :]
+    x_tp1 = x_t + torch.randn_like(x_t) * 0.01
+    nll = runner._step_nll(x_t, x_tp1, mu, chol_sigma)
+
+    sigma = chol_sigma.diagonal(dim1=-2, dim2=-1)
+    dt = runner.default_dt
+    dx = x_tp1 - x_t - mu * dt
+    var = sigma**2 * dt
+    manual = (0.5 * (math.log(2.0 * math.pi) + torch.log(var) + dx**2 / var)).sum(-1).mean()
+    assert torch.allclose(nll, manual, atol=1e-3)  # runner adds an eps diagonal jitter
+
+
+def test_exp3_ablation_cfg_modules_build():
+    import importlib.util
+
+    cfg_dir = Path(__file__).resolve().parents[1] / "experiments" / "neural_SDE" / "trainer_cfg" / "neural_SDE"
+    expected = {
+        "exp3_independent": (False, False),
+        "exp3_corr_only": (False, True),
+        "exp3_context_only": (True, False),
+        "exp3_full": (True, True),
+    }
+    for name, (use_context, learn_corr) in expected.items():
+        spec = importlib.util.spec_from_file_location(name, cfg_dir / f"{name}.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        cfg = module.get_trainer_cfg()
+        assert cfg["model_cfg"]["_target_"] is NeuralSDEMoEMultiAsset
+        assert cfg["model_cfg"]["use_context"] is use_context
+        assert cfg["model_cfg"]["learn_corr"] is learn_corr
+        assert cfg["dset_cfg"]["n_assets"] == 5
+        assert cfg["run_cfg"]["rng_seed"] == 42
+        assert cfg["run_cfg"]["run_name"] == name

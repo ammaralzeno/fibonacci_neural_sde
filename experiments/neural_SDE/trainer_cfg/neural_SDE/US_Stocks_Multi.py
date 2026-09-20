@@ -38,6 +38,8 @@ def get_trainer_cfg():
         num_features=7,
         hidden_sizes=[32, 16],
         corr_init=None,     # overwritten at runtime with the increment correlation of the training data
+        use_context=True,   # Experiment 3 ablation flag: portfolio context in gate/expert inputs
+        learn_corr=True,    # Experiment 3 ablation flag: learn R (False freezes R = I)
     )
 
     trainer_cfg = dict(
