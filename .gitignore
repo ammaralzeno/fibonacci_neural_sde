@@ -192,3 +192,5 @@ cython_debug/
 amgm/data/data-20250505
 
 *.pt
+# Local data loader cache (created by load_sebx_am_data)
+Data/**/cache.pkl

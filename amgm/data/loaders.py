@@ -187,6 +187,11 @@ def make_loader(
     if data_source == "local" and training_data_type == "US_Stocks":
         return USStocksLoader(dset_path)
 
+    elif data_source == "local" and training_data_type == "US_Stocks_Multi":
+        # Same underlying AM data as US_Stocks; the multi-asset dataset classes
+        # handle basket alignment on top of it.
+        return USStocksLoader(dset_path)
+
     elif data_source == "local" and training_data_type == "RX1":
         return RX1Loader(dset_path)
 
