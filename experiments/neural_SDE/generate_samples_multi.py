@@ -15,11 +15,14 @@ from amgm.data.neural_SDE_multi import MultiAssetNeuralSDEDataset, _fib_features
 from amgm.models.neural_SDE.multi_runner import MultiAssetNeuralSDERunner
 import amgm.utils.common as common
 
-# For parallel run is necessary otherwise, torch will overload each vCPU 
+# For parallel run is necessary otherwise, torch will overload each vCPU
 # torch.set_num_threads(1)          # limit PyTorch to 1 thread for intra-op parallelism
 # torch.set_num_interop_threads(1)  # limit inter-op parallelism to 1 thread
 torch.set_num_threads(16)
-torch.set_num_interop_threads(2)
+try:
+    torch.set_num_interop_threads(2)  # one-shot: raises if parallel work already started
+except RuntimeError:
+    pass  # e.g. when imported into a process that already ran torch ops (tests)
 
 def _resolve_seed(seed_value):
     if seed_value in (None, "random"):

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 import torch
 from torch import nn
 
@@ -812,3 +813,47 @@ def test_exp3_ablation_cfg_modules_build():
         assert cfg["dset_cfg"]["n_assets"] == 5
         assert cfg["run_cfg"]["rng_seed"] == 42
         assert cfg["run_cfg"]["run_name"] == name
+
+
+def test_compare_ablations_end_to_end(tmp_path):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "compare_ablations_multi",
+        Path(__file__).resolve().parents[1] / "experiments" / "neural_SDE" / "compare_ablations_multi.py",
+    )
+    compare = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(compare)
+
+    # Fake run dirs: metrics.csv with two epochs + a checkpoint per configuration
+    log_root = tmp_path / "logs"
+    best_nll = {"exp3_independent": -8.0, "exp3_corr_only": -8.1, "exp3_context_only": -7.9, "exp3_full": -7.95}
+    for name, nll in best_nll.items():
+        run_dir = log_root / name
+        run_dir.mkdir(parents=True)
+        pd.DataFrame(
+            {
+                "epoch": [0, 1],
+                "step": [5, 11],
+                "val/loss": [nll + 0.05, nll + 0.01],
+                "val/loss_sde": [nll + 0.1, nll],
+            }
+        ).to_csv(run_dir / "metrics.csv", index=False)
+        ckpt_dir = run_dir / "checkpoints"
+        ckpt_dir.mkdir()
+        runner = _make_runner(n_assets=3, lookback=32)
+        torch.save({"hyper_parameters": dict(runner.hparams), "state_dict": runner.state_dict()}, ckpt_dir / "best.ckpt")
+
+    out_dir = tmp_path / "out"
+    table = compare.main_compare_ablations(log_root=log_root, output_dir=out_dir)
+
+    assert list(table["config"]) == list(best_nll)
+    row = table.set_index("config")
+    assert row.loc["exp3_corr_only", "best_val_nll"] == -8.1
+    assert row.loc["exp3_corr_only", "best_epoch"] == 1
+    assert row.loc["exp3_corr_only", "delta_vs_independent"] == pytest.approx(-0.1)
+    assert row.loc["exp3_independent", "delta_vs_independent"] == 0.0
+    for name in ["exp3_nll_table.csv", "exp3_convergence.png", "exp3_corr_heatmaps.png", "exp3_findings.md"]:
+        assert (out_dir / name).exists(), name
+    findings = (out_dir / "exp3_findings.md").read_text()
+    assert "Correlation channel" in findings and "-8.1" in findings
