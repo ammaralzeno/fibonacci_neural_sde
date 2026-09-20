@@ -19,6 +19,7 @@ from amgm.data.neural_SDE_multi import (
 )
 from amgm.models.mlp_multi import NeuralSDEMoEMultiAsset
 import amgm.utils.common as common
+from experiments.neural_SDE import analyze_fib_features_multi as fib_analysis
 
 LOOKBACK = 126
 BASKET = ["AAA", "BBB", "CCC"]
@@ -475,6 +476,7 @@ class _FakeMultiDataset:
         self.n_assets = n_assets
         self.basket_issue_ids = [f"asset{i}" for i in range(n_assets)]
         self.lookback = lookback
+        self.lookback_window = lookback  # alias matching MultiAssetNeuralSDEDataset
         self.true_corr = corr.astype(np.float32)
 
         starts = np.arange(0, n_days - lookback)
@@ -594,3 +596,103 @@ def test_generation_writes_member4_artifacts(tmp_path):
 
     assert (tmp_path / "correlation_sanity_multi.png").exists()
     assert len(list(out_dir.glob("synthetic_rollout_multi_*_MC.png"))) == n_cond
+
+
+# ---------------------------------------------------------------------------
+# Experiment 2: multi-asset Fibonacci feature analysis
+# ---------------------------------------------------------------------------
+
+
+def test_nearest_level_distances():
+    features = np.array([[[0.5, 0.1, -0.05, 0.3, 0.9, 1.2, 1.5]]])  # (1, 1, 7)
+    signed, absolute = fib_analysis.nearest_level_distances(features)
+    assert signed.shape == (1, 1) and absolute.shape == (1, 1)
+    assert absolute[0, 0] == 0.05
+    assert signed[0, 0] == -0.05  # signed value of the closest level, not the largest
+
+
+def test_pairwise_cooccurrence_independence_gives_unit_lift():
+    # P(A)=P(B)=1/2, joint exactly 1/4 by construction -> lift exactly 1
+    mask = np.array(
+        [
+            [True, True],
+            [True, False],
+            [False, True],
+            [False, False],
+        ]
+    )
+    out = fib_analysis.pairwise_cooccurrence(mask)
+    np.testing.assert_allclose(out["p_near"], [0.5, 0.5])
+    assert out["joint"][0, 1] == 0.25
+    np.testing.assert_allclose(out["lift"][0, 1], 1.0)
+    np.testing.assert_allclose(out["lift"][1, 0], 1.0)
+
+
+def test_pairwise_cooccurrence_locked_gives_inverse_rate():
+    # A and B near on exactly the same days with rate 1/4 -> lift = 1/p = 4
+    mask = np.zeros((8, 2), dtype=bool)
+    mask[:2, :] = True
+    out = fib_analysis.pairwise_cooccurrence(mask)
+    np.testing.assert_allclose(out["lift"][0, 1], 4.0)
+
+
+def test_pairwise_cooccurrence_zero_rate_is_nan():
+    mask = np.zeros((8, 3), dtype=bool)
+    mask[:2, 0] = True  # asset 1 and 2 never near a level
+    out = fib_analysis.pairwise_cooccurrence(mask)
+    assert np.isnan(out["lift"][0, 1]) and np.isnan(out["lift"][2, 0])
+    assert np.isfinite(out["lift"][0, 0])
+
+
+def test_next_day_returns_alignment():
+    ds = _FakeMultiDataset(n_assets=3, n_days=120, lookback=30)
+    rets = fib_analysis.next_day_returns(ds)
+    assert rets.shape == (len(ds), 3)
+    # Window s ends at calendar index s + w - 1; return is to day s + w
+    s = 10
+    expected = ds.prices_aligned[s + ds.lookback] / ds.prices_aligned[s + ds.lookback - 1] - 1.0
+    np.testing.assert_allclose(rets[s], expected, rtol=1e-6)
+    assert np.isfinite(rets).all()  # dataset construction gives every window a next day
+
+
+def test_conditional_returns_selection():
+    mask = np.zeros((100, 2), dtype=bool)
+    mask[::4, 0] = True  # asset 0 near a level every 4th day
+    rets = np.arange(200, dtype=float).reshape(100, 2) * 0.001
+    out = fib_analysis.conditional_returns(mask, rets)
+    s = out[(0, 1)]
+    np.testing.assert_allclose(s["cond"], rets[::4, 1])
+    assert s["n_cond"] == 25
+    assert np.isfinite(s["ks_stat"]) and 0 <= s["ks_p"] <= 1
+    assert np.isnan(out[(0, 0)]["ks_stat"])  # diagonal is not a cross-asset test
+
+
+def test_fsm_events_per_asset_structure():
+    ds = _FakeMultiDataset(n_assets=3, n_days=220, lookback=40)
+    counts = fib_analysis.fsm_events_per_asset(ds.prices_aligned)
+    assert len(counts) == 3
+    for c in counts:
+        assert set(c) == {"Bounce", "Break", "Hover", "Timeout"}
+        assert all(isinstance(v, int) and v >= 0 for v in c.values())
+
+
+def test_fib_analysis_end_to_end(tmp_path):
+    ds = _FakeMultiDataset(n_assets=3, n_days=220, lookback=40, rho=0.6, seed=3)
+    out = fib_analysis.main_fib_analysis(
+        dataset=ds, output_dir=tmp_path, eps=0.05, segment_days=60, max_lag=5
+    )
+    for name in [
+        "figA_simultaneous_levels.png",
+        "figB_distance_heatmap.png",
+        "check_a_signed_distance_hist.png",
+        "check_a_fsm_events.png",
+        "check_b_cooccurrence_lift.png",
+        "check_b_lagged_xcorr.png",
+        "check_c_conditional_ks_heatmap.png",
+        "check_c_conditional_overlays.png",
+        "exp2_findings.md",
+    ]:
+        assert (tmp_path / name).exists(), name
+    assert "cooccurrence" in out and "conditional" in out
+    findings = (tmp_path / "exp2_findings.md").read_text()
+    assert "asset0" in findings and "simultaneously" in findings.lower()
