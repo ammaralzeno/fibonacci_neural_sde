@@ -18,7 +18,7 @@ multivariate Gaussian NLL (`val/loss_sde`); lower is better.
 
 Figures: `exp3_convergence.png`, `exp3_corr_heatmaps.png`. Data: `exp3_nll_table.csv`.
 
-Caveats: single seed; small sample (380 train / 95 val windows); the basket was
-selected by data coverage, and Exp 2 found near-independent cross-asset level
-simultaneity on it — mechanism values may grow on a relationship-driven basket
-(Member 4's Exp 1).
+Caveats: single seed; small sample (~380 train / ~95 val windows). The two Exp 3
+baskets bracket dependency strength: coverage-selected (mean pairwise return corr
+0.08) vs relationship-selected same-sector (0.84) — joint modeling provides value
+only when true cross-asset dependencies exist.
