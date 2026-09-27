@@ -118,3 +118,65 @@ Important:
 ### 4. Statistical Comparison
 
 Use `experiments/neural_SDE/Statistical_comparison.ipynb` to compare Neural SDE synthetic samples against the Vasicek baseline after generating the Monte Carlo NPZ artifact.
+
+### 5. Gating Diagnostics (Experiments 1 and 2)
+
+Train with gating diagnostics enabled:
+
+```bash
+python experiments/neural_SDE/train_neural_SDE.py --trainer_cfg US_Stocks --gating-diagnostics
+```
+
+Re-run analysis or rebuild figures from a diagnostic run:
+
+```bash
+python -m experiments.neural_SDE.analyze_gating --training-run PATH_TO_DIAGNOSTIC_RUN
+python -m experiments.neural_SDE.analyze_gating --render-only --output-dir PATH_TO_DIAGNOSTIC_RUN
+```
+
+Analyze an existing MoE checkpoint (experiment 2 only):
+
+```bash
+python -m experiments.neural_SDE.analyze_gating --checkpoint PATH_TO_CHECKPOINT --issue-ids-file stocks.txt
+```
+
+Notes:
+
+- Diagnostic runs default to seed 1 when no fixed seed is configured.
+- Outputs include eight PNG figures, `report.html`, CSV tables, compressed arrays, and an isolated checkpoint under `workspace/neural_SDE/gating_diagnostics/`.
+- Use `--diagnostics-dir Results/gating_diagnostics/RUN_NAME` with the training command to save to a fresh folder under `Results/` instead. Generated results are ignored by Git.
+- `stocks.txt` contains one stock ID per line; it is needed when the checkpoint does not record the selected stocks.
+- On Windows without a C++ compiler, set `$env:TORCH_COMPILE_DISABLE = "1"` in PowerShell before training.
+
+Run the diagnostic tests:
+
+```bash
+python -m pytest tests/test_gating_diagnostics.py -q
+```
+
+### 6. Temporal Gating Diagnostics (Experiment 4)
+
+Compare real trajectories with 100 synthetic paths per origin using a completed diagnostic run:
+
+```bash
+python -m experiments.neural_SDE.analyze_temporal_gating --training-run Results/gating_diagnostics/baseline_seed1 --paths-per-origin 100 --seed 1
+```
+
+Rebuild the five figures and HTML report from saved tables:
+
+```bash
+python -m experiments.neural_SDE.analyze_temporal_gating --render-only --output-dir PATH_TO_TEMPORAL_RUN
+```
+
+Notes:
+
+- Reuses the source run's best checkpoint and evaluation origins without training.
+- Outputs go into a fresh folder under `Results/gating_diagnostics/`; use `--output-dir PATH` to choose another fresh folder.
+- Saves switch counts, censored dwell lengths, transition matrices, soft gate changes, coverage, CSV tables, and per-origin arrays.
+- Use `--data-path PATH_TO_SECURITY_DATA` if the source data has moved.
+
+Run the temporal diagnostic tests:
+
+```bash
+python -m pytest tests/test_temporal_gating.py -q
+```

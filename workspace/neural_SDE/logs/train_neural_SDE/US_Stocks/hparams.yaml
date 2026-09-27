@@ -1,0 +1,50 @@
+acc_cfg:
+  _target_: !!python/name:torchmetrics.regression.mae.MeanAbsoluteError ''
+compile_model: true
+dset_cfg:
+  data_source: local
+  dset_path: !!python/object/apply:pathlib.PosixPath
+  - /
+  - Users
+  - daniel
+  - Dev
+  - GitHub
+  - Repositories
+  - fibonacci_neural_sde
+  - Data
+  - data-20250505
+  dt: 1.0
+  end_date: '2017-12-31'
+  issue_ids: []
+  lookback_window: 252
+  max_windows_per_issue: 1000
+  num_iids: 50
+  price_value_col: ClAdjLoc
+  start_date: '2014-12-31'
+  training_data_type: US_Stocks
+entropy_beta: 0.1
+entropy_beta_decay_steps: 800
+entropy_beta_min: 0.01
+entropy_beta_warmup_steps: 200
+expert_balance_lambda: 0
+loss_cfg:
+  _target_: torch.nn.modules.loss.MSELoss
+model_cfg:
+  _target_: amgm.models.mlp.NeuralSDEMoE
+  hidden_sizes:
+  - 32
+  - 16
+  lookback_window: 252
+  num_features: 7
+  output_size: 1
+optim_cfg:
+  _target_: torch.optim.adam.Adam
+  lr: 0.001
+  weight_decay: 1.0e-05
+run_cfg:
+  batch_size: 256
+  max_epochs: 20
+  num_workers: 0
+  rng_seed: null
+  run_idx: 1
+sched_cfg: null
