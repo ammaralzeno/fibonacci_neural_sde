@@ -153,3 +153,30 @@ Run the diagnostic tests:
 ```bash
 python -m pytest tests/test_gating_diagnostics.py -q
 ```
+
+### 6. Temporal Gating Diagnostics (Experiment 4)
+
+Compare real trajectories with 100 synthetic paths per origin using a completed diagnostic run:
+
+```bash
+python -m experiments.neural_SDE.analyze_temporal_gating --training-run Results/gating_diagnostics/baseline_seed1 --paths-per-origin 100 --seed 1
+```
+
+Rebuild the five figures and HTML report from saved tables:
+
+```bash
+python -m experiments.neural_SDE.analyze_temporal_gating --render-only --output-dir PATH_TO_TEMPORAL_RUN
+```
+
+Notes:
+
+- Reuses the source run's best checkpoint and evaluation origins without training.
+- Outputs go into a fresh folder under `Results/gating_diagnostics/`; use `--output-dir PATH` to choose another fresh folder.
+- Saves switch counts, censored dwell lengths, transition matrices, soft gate changes, coverage, CSV tables, and per-origin arrays.
+- Use `--data-path PATH_TO_SECURITY_DATA` if the source data has moved.
+
+Run the temporal diagnostic tests:
+
+```bash
+python -m pytest tests/test_temporal_gating.py -q
+```

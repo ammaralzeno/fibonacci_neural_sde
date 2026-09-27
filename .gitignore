@@ -195,3 +195,4 @@ amgm/data/data-20250505
 
 # Gating diagnostic outputs are generated locally.
 /Results/gating_diagnostics/
+/Results/experiment_4_temporal_gating/
