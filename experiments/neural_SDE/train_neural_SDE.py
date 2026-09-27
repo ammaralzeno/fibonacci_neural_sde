@@ -18,16 +18,18 @@ from amgm.models.neural_SDE.runner import NeuralSDERunner
 import amgm.utils.common as common
 import amgm.utils.myplot as myplot
 
-# For parallel run is necessary otherwise, torch will overload each vCPU 
+# For parallel run is necessary otherwise, torch will overload each vCPU
 # torch.set_num_threads(1)          # limit PyTorch to 1 thread for intra-op parallelism
 # torch.set_num_interop_threads(1)  # limit inter-op parallelism to 1 thread
 torch.set_num_threads(16)
 torch.set_num_interop_threads(2)
 
+
 def _resolve_seed(seed_value):
     if seed_value in (None, "random"):
-        return torch.seed() % (2**31 - 1)  
+        return torch.seed() % (2**31 - 1)
     return int(seed_value)
+
 
 def _build_dataloaders(dset_cfg, batch_size, seed):
 
@@ -37,16 +39,18 @@ def _build_dataloaders(dset_cfg, batch_size, seed):
     else:
         dataset = NeuralSDEDataset(**dset_cfg, rng_seed=seed)
         is_synthetic_dataset = False
-        
+
     train_ratio = float(dset_cfg.get("train_split", 0.8))
     train_size = max(1, int(train_ratio * len(dataset)))
     val_size = len(dataset) - train_size
 
     split_gen = torch.Generator().manual_seed(seed)
-    train_set, val_set = random_split(dataset, [train_size, val_size], generator=split_gen)
+    train_set, val_set = random_split(
+        dataset, [train_size, val_size], generator=split_gen
+    )
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False)
-    
+
     return train_loader, val_loader, is_synthetic_dataset, seed
 
 
@@ -110,11 +114,13 @@ def _format_validation_metrics(val_metrics):
 def main(trainer_cfg, save_rollout_plots, model_type, gating_diagnostics=False, diagnostics_dir=None):
 
     # Suppress Lightning warning about num_workers=0
-    warnings.filterwarnings("ignore", ".*does not have many workers which may be a bottleneck.*")
+    warnings.filterwarnings(
+        "ignore", ".*does not have many workers which may be a bottleneck.*"
+    )
     multiprocessing.set_start_method("spawn", force=True)
     torch.backends.cudnn.deterministic = False
     torch.backends.cudnn.benchmark = True
-    
+
     wdir = amgm_config.work_dir("neural_SDE")
 
     if gating_diagnostics:
@@ -133,14 +139,14 @@ def main(trainer_cfg, save_rollout_plots, model_type, gating_diagnostics=False, 
     batch_size = run_cfg["batch_size"]
     seed = _resolve_seed(run_cfg.get("rng_seed"))
     seed_everything(seed, workers=True)
-        
+
     version = run_cfg.get("run_name", "US_Stocks")
     logger = pl_loggers.TensorBoardLogger(
         name=Path(__file__).stem,
         save_dir=wdir / "logs",
         version=version,
     )
-    
+
     checkpoint_callback = ModelCheckpoint(
             monitor="val/loss",
             mode="min",
@@ -159,7 +165,9 @@ def main(trainer_cfg, save_rollout_plots, model_type, gating_diagnostics=False, 
     t0 = time()
 
     mdl = NeuralSDERunner(**trainer_cfg)
-    train_loader, val_loader, is_synthetic_dataset, seed = _build_dataloaders(dset_cfg, batch_size, seed)
+    train_loader, val_loader, is_synthetic_dataset, seed = _build_dataloaders(
+        dset_cfg, batch_size, seed
+    )
     print(f"Using rng_seed={seed}")
 
     callbacks = [checkpoint_callback]
@@ -191,7 +199,7 @@ def main(trainer_cfg, save_rollout_plots, model_type, gating_diagnostics=False, 
         first_batch = predictions[0]
         print(f"Prediction batch keys: {list(first_batch.keys())}")
         print(f"Predicted next-price batch shape: {first_batch['x_tp1_pred'].shape}")
-        
+
         if save_rollout_plots:
             # Randomly plot plot_fib_levels for 10 random samples from the validation set
             random_indices = torch.randperm(first_batch["x_window"].shape[0])[:10]
@@ -204,7 +212,7 @@ def main(trainer_cfg, save_rollout_plots, model_type, gating_diagnostics=False, 
                     x_t=first_batch["x_t"][idx].item(),
                     x_tp1=first_batch["x_tp1"][idx].item(),
                     x_tp1_pred=first_batch["x_tp1_pred"][idx].item(),
-                    file_name=f"price_window_and_fib_levels_{idx.item()}.png"
+                    file_name=f"price_window_and_fib_levels_{idx.item()}.png",
                 )
 
     residual_metrics = common.evaluate_residual_calibration(predictions, dset_cfg)
@@ -225,16 +233,17 @@ def main(trainer_cfg, save_rollout_plots, model_type, gating_diagnostics=False, 
 
     return val_metrics, predictions
 
+
 if __name__ == "__main__":
     # This script saves 10 model checkpoints with best val_acc in Path(logger.log_dir) / "checkpoints"
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s | %(name)s | %(levelname)s | %(message)s"
+        format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
     )
 
     save_rollout_plots = False
-    model_type = "MoE"   # Options: "MLP" or "MoE" or "PatchTST"
-    
+    model_type = "MoE"  # Options: "MLP" or "MoE" or "PatchTST"
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--gating-diagnostics", action="store_true",
                         help="Observe unchanged MoE training and generate eight diagnostic figures (default seed 1)")
@@ -247,10 +256,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.trainer_cfg is None:
-        raise ValueError("Please provide a trainer configuration module using --trainer_cfg.")
-    
+        raise ValueError(
+            "Please provide a trainer configuration module using --trainer_cfg."
+        )
+
     cfg_path = f"trainer_cfg.neural_SDE.{args.trainer_cfg}"
-    cfg_module = importlib.import_module(cfg_path, package=__package__ or "experiments.neural_SDE")
+    cfg_module = importlib.import_module(
+        cfg_path, package=__package__ or "experiments.neural_SDE"
+    )
     trainer_cfg = cfg_module.get_trainer_cfg()
    
     if args.diagnostics_dir is not None and not args.gating_diagnostics:

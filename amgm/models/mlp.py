@@ -174,7 +174,7 @@ class NeuralSDEMoE(nn.Module):
 
     def __init__(self, lookback_window, num_features=7, hidden_sizes=(64, 32), output_size=1, gate_temperature=1.0):
         super().__init__()
-        self.gate_temperature = gate_temperature
+        self.gate_temperature = gate_temperature # scaling test
 
         self.lookback_window = lookback_window
         self.num_features = num_features
