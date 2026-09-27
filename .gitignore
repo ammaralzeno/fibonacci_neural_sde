@@ -192,5 +192,7 @@ cython_debug/
 amgm/data/data-20250505
 
 *.pt
-*.pkl
-.DS_Store
+
+# Gating diagnostic outputs are generated locally.
+/Results/gating_diagnostics/
+/Results/experiment_4_temporal_gating/

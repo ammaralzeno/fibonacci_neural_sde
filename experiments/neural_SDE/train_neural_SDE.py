@@ -111,8 +111,7 @@ def _format_validation_metrics(val_metrics):
 
     return "\n".join(lines)
 
-
-def main(trainer_cfg, save_rollout_plots, model_type):
+def main(trainer_cfg, save_rollout_plots, model_type, gating_diagnostics=False, diagnostics_dir=None):
 
     # Suppress Lightning warning about num_workers=0
     warnings.filterwarnings(
@@ -123,6 +122,17 @@ def main(trainer_cfg, save_rollout_plots, model_type):
     torch.backends.cudnn.benchmark = True
 
     wdir = amgm_config.work_dir("neural_SDE")
+
+    if gating_diagnostics:
+        from copy import deepcopy
+        from datetime import datetime, timezone
+        from experiments.neural_SDE.gating_diagnostics.collection import GatingDiagnostics
+        trainer_cfg = deepcopy(trainer_cfg)
+        if trainer_cfg["run_cfg"].get("rng_seed") in (None, "random"):
+            trainer_cfg["run_cfg"]["rng_seed"] = 1
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        diagnostics_dir = Path(diagnostics_dir or wdir / "gating_diagnostics" / f"baseline_{stamp}").resolve()
+        diagnostics_dir.mkdir(parents=True, exist_ok=False)
 
     dset_cfg = trainer_cfg["dset_cfg"]
     run_cfg = trainer_cfg["run_cfg"]
@@ -138,15 +148,14 @@ def main(trainer_cfg, save_rollout_plots, model_type):
     )
 
     checkpoint_callback = ModelCheckpoint(
-        monitor="val/loss",
-        mode="min",
-        auto_insert_metric_name=False,  # Avoid "val/loss" key be part of the filename, explicitly add the "val_loss" to the filename instead
-        filename="best-{epoch:02d}-val_loss={val/loss:.4f}_NEW_"
-        + model_type,  # Explicitly named metric val_loss
-        save_top_k=1,  # Only save the best
-        dirpath=Path(logger.log_dir) / "checkpoints",  # Your directory for checkpoints
-    )
-
+            monitor="val/loss",
+            mode="min",
+            auto_insert_metric_name=False,  # Avoid "val/loss" key be part of the filename, explicitly add the "val_loss" to the filename instead
+            filename="best-{epoch:02d}-val_loss={val/loss:.4f}_NEW_" + model_type,  # Explicitly named metric val_loss
+            save_top_k=1,                # Only save the best
+            dirpath=(diagnostics_dir if gating_diagnostics else Path(logger.log_dir)) / "checkpoints"
+            )
+    
     print(f"Working directory: {wdir}")
     print(f"Relative log path: {Path(logger.log_dir).relative_to(wdir)}")
     print(f"Full log path: {logger.log_dir}")
@@ -161,12 +170,22 @@ def main(trainer_cfg, save_rollout_plots, model_type):
     )
     print(f"Using rng_seed={seed}")
 
+    callbacks = [checkpoint_callback]
+    if gating_diagnostics:
+        from amgm.models.mlp import NeuralSDEMoE
+        actual_model = getattr(mdl.model, "_orig_mod", mdl.model)
+        if is_synthetic_dataset or not isinstance(actual_model, NeuralSDEMoE):
+            raise ValueError("Gating diagnostics require the real-stock NeuralSDEMoE configuration")
+        callbacks.append(GatingDiagnostics(diagnostics_dir, seed, trainer_cfg,
+                                           train_loader.dataset, val_loader.dataset))
+        print(f"Gating diagnostics: {diagnostics_dir}")
+
     trainer = Trainer(
         max_epochs=run_cfg["max_epochs"],
         check_val_every_n_epoch=1,
-        logger=logger,
-        accelerator="gpu",
-        callbacks=[checkpoint_callback],
+        logger=False,
+        accelerator="cpu",
+        callbacks=callbacks
     )
     trainer.fit(mdl, train_dataloaders=train_loader, val_dataloaders=val_loader)
 
@@ -206,6 +225,12 @@ def main(trainer_cfg, save_rollout_plots, model_type):
             print("Synthetic recovery metrics:")
             common.print_dict(recovery)
 
+    if gating_diagnostics:
+        from experiments.neural_SDE.gating_diagnostics.analysis import analyze_checkpoint
+        report = analyze_checkpoint(checkpoint_callback.best_model_path, diagnostics_dir,
+                                    seed=seed, training_run=diagnostics_dir)
+        print(f"Gating report: {report}")
+
     return val_metrics, predictions
 
 
@@ -220,6 +245,10 @@ if __name__ == "__main__":
     model_type = "MoE"  # Options: "MLP" or "MoE" or "PatchTST"
 
     parser = argparse.ArgumentParser()
+    parser.add_argument("--gating-diagnostics", action="store_true",
+                        help="Observe unchanged MoE training and generate eight diagnostic figures (default seed 1)")
+    parser.add_argument("--diagnostics-dir", type=Path,
+                        help="Fresh diagnostic run directory, including isolated checkpoints")
     parser.add_argument(
         "--trainer_cfg",
         help="Dotted module path (relative to this package) exposing get_trainer_cfg().",
@@ -236,5 +265,9 @@ if __name__ == "__main__":
         cfg_path, package=__package__ or "experiments.neural_SDE"
     )
     trainer_cfg = cfg_module.get_trainer_cfg()
-
-    main(trainer_cfg, save_rollout_plots, model_type)
+   
+    if args.diagnostics_dir is not None and not args.gating_diagnostics:
+        parser.error("--diagnostics-dir requires --gating-diagnostics")
+    main(trainer_cfg, save_rollout_plots, model_type,
+         gating_diagnostics=args.gating_diagnostics, diagnostics_dir=args.diagnostics_dir)
+    
