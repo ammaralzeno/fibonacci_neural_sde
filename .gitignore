@@ -192,3 +192,5 @@ cython_debug/
 amgm/data/data-20250505
 
 *.pt
+*.pkl
+.DS_Store

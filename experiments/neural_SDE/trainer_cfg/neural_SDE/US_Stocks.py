@@ -6,6 +6,7 @@ from torchmetrics import MeanAbsoluteError
 from amgm import config as amgm_config
 from amgm.models.mlp import NeuralSDEMLP, NeuralSDEMoE, PatchNeuralSDETransformer
 
+
 def get_trainer_cfg():
     output_size = 1
 
@@ -18,13 +19,13 @@ def get_trainer_cfg():
     )
 
     dset_cfg = dict(
-        issue_ids=[],   #["00100401"],
-        num_iids=50,    # Only is read if issue_ids is None or empty, otherwise ignored
+        issue_ids=[],  # ["00100401"],
+        num_iids=1000,  # Only is read if issue_ids is None or empty, otherwise ignored
         start_date="2014-12-31",
-        end_date="2017-12-31",
+        end_date="2020-12-31",
         lookback_window=252,
         max_windows_per_issue=1000,
-        dt= 1.0,        # dt in: X_{t+1} = X_t + mu(X_t) * dt + sigma(X_t) * sqrt(dt) * eps_t
+        dt=1.0,  # dt in: X_{t+1} = X_t + mu(X_t) * dt + sigma(X_t) * sqrt(dt) * eps_t
         price_value_col="ClAdjLoc",
         training_data_type="US_Stocks",
         data_source="local",  # "local" or "yahoo",
@@ -38,7 +39,7 @@ def get_trainer_cfg():
         hidden_sizes=[32, 16],
         output_size=output_size,
     )
-    
+
     trainer_cfg = dict(
         run_cfg=run_cfg,
         dset_cfg=dset_cfg,
@@ -47,10 +48,14 @@ def get_trainer_cfg():
         acc_cfg=dict(_target_=MeanAbsoluteError),
         optim_cfg=dict(_target_=torch.optim.Adam, lr=1e-3, weight_decay=1e-5),
         sched_cfg=None,
-        entropy_beta=0.1,   # Regularization strength for entropy loss in MoE model. Set to 0.0 to disable entropy regularization.
+        entropy_beta=0.1,  # Regularization strength for entropy loss in MoE model. Set to 0.0 to disable entropy regularization.
         entropy_beta_min=1e-2,
         entropy_beta_warmup_steps=200,
-        entropy_beta_decay_steps=800,     # Set to 0 to have a constant entropy_beta value during training
+        entropy_beta_decay_steps=800,  # Set to 0 to have a constant entropy_beta value during training
+        gate_temperature_max=5.0,
+        gate_temperature_min=0.5,
+        gate_temperature_warmup_steps=200,
+        gate_temperature_decay_steps=800,
         expert_balance_lambda=0,
     )
 
