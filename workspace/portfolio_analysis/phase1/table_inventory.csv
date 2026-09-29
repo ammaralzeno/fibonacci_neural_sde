@@ -1,0 +1,6 @@
+table_name,rows,columns,column_names
+company_universe,53155,3,Date | Gvkey | SectorCode
+constituents,3568,10,Period | Date | Gvkey | IssueId | Mcap | Country | Region | SectorCode | IndustryCode | SubIndustryCode
+constituents_data,1879,13,IssueId | Date | CcyLoc | OpAdjLoc | HiAdjLoc | LoAdjLoc | ClAdjLoc | OpAdjUsd | HiAdjUsd | LoAdjUsd | ClAdjUsd | VoAdj | TotalReturnFactor
+security_data,3136628,13,IssueId | Date | CcyLoc | OpAdjLoc | HiAdjLoc | LoAdjLoc | ClAdjLoc | OpAdjUsd | HiAdjUsd | LoAdjUsd | ClAdjUsd | VoAdj | TotalReturnFactor
+security_universe,500798,4,Date | Gvkey | IssueId | SectorCode
