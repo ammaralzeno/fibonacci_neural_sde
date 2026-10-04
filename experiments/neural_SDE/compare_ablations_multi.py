@@ -25,6 +25,14 @@ EXP3_CONFIGS = {
 }
 
 
+def config_of(run_name):
+    """(use_context, learn_corr, label) for a run name; a _<basket> suffix is allowed."""
+    for key, value in EXP3_CONFIGS.items():
+        if run_name == key or run_name.startswith(key + "_"):
+            return value
+    return None, None, run_name
+
+
 def load_val_curves(log_root, run_names):
     """Per-epoch validation metrics per run: {name: DataFrame(epoch, val/loss, val/loss_sde)}.
 
@@ -43,7 +51,7 @@ def build_nll_table(curves):
     """One row per configuration: best/final validation NLL and delta vs independent."""
     rows = []
     for name, val in curves.items():
-        use_context, learn_corr, label = EXP3_CONFIGS.get(name, (None, None, name))
+        use_context, learn_corr, label = config_of(name)
         best_idx = val["val/loss_sde"].idxmin()
         rows.append(
             {
@@ -69,7 +77,7 @@ def plot_convergence(curves, output_file):
     """Validation NLL (val/loss_sde) vs epoch, one curve per configuration."""
     fig, ax = plt.subplots(figsize=(8, 4.5))
     for name, val in curves.items():
-        label = EXP3_CONFIGS.get(name, (None, None, name))[2]
+        label = config_of(name)[2]
         ax.plot(val["epoch"], val["val/loss_sde"], marker="o", markersize=3, linewidth=1.4, label=label)
     ax.set_xlabel("epoch")
     ax.set_ylabel("validation NLL (val/loss_sde)")
@@ -95,7 +103,7 @@ def plot_corr_heatmaps(corrs, output_file):
     for ax, name in zip(axes, names):
         corr = corrs[name]
         im = ax.imshow(corr, cmap="RdBu_r", vmin=-1, vmax=1)
-        label = EXP3_CONFIGS.get(name, (None, None, name))[2]
+        label = config_of(name)[2]
         off = ~np.eye(corr.shape[0], dtype=bool)
         ax.set_title(f"{label}\noff-diag |mean|={np.abs(corr[off]).mean():.3f}", fontsize=9)
         ax.set_xticks(range(corr.shape[0]), range(corr.shape[0]), fontsize=7)

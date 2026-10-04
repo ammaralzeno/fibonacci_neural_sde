@@ -510,12 +510,15 @@ if __name__ == "__main__":
     parser.add_argument("--segment-days", type=int, default=252, help="Days shown in the simultaneous-levels figure.")
     parser.add_argument("--max-lag", type=int, default=10)
     parser.add_argument("--output-dir", default=None, help="Defaults to logs/exp2_fib_analysis.")
+    parser.add_argument("--issue-ids", nargs="*", default=None, help="Override the basket of IssueIds from the config.")
     args = parser.parse_args()
 
     cfg_path = f"trainer_cfg.neural_SDE.{args.trainer_cfg}"
     cfg_module = importlib.import_module(cfg_path, package="experiments.neural_SDE")
     dset_cfg = dict(cfg_module.get_trainer_cfg()["dset_cfg"])
     dset_cfg["n_assets"] = args.n_assets
+    if args.issue_ids:
+        dset_cfg["issue_ids"] = args.issue_ids
 
     dataset = MultiAssetNeuralSDEDataset(**dset_cfg, rng_seed=42)
     main_fib_analysis(dataset=dataset, output_dir=args.output_dir,

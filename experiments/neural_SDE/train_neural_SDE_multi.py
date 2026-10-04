@@ -176,6 +176,8 @@ if __name__ == "__main__":
         "--trainer_cfg",
         help="Dotted module path (relative to this package) exposing get_trainer_cfg().",
     )
+    parser.add_argument("--issue-ids", nargs="*", default=None, help="Override the basket of IssueIds from the config.")
+    parser.add_argument("--run-name", default=None, help="Override run_cfg.run_name (log directory name).")
     args = parser.parse_args()
 
     if args.trainer_cfg is None:
@@ -184,5 +186,10 @@ if __name__ == "__main__":
     cfg_path = f"trainer_cfg.neural_SDE.{args.trainer_cfg}"
     cfg_module = importlib.import_module(cfg_path, package=__package__ or "experiments.neural_SDE")
     trainer_cfg = cfg_module.get_trainer_cfg()
+
+    if args.issue_ids:
+        trainer_cfg["dset_cfg"] = dict(trainer_cfg["dset_cfg"], issue_ids=args.issue_ids)
+    if args.run_name:
+        trainer_cfg["run_cfg"] = dict(trainer_cfg["run_cfg"], run_name=args.run_name)
 
     main(trainer_cfg, save_rollout_plots, model_type)
