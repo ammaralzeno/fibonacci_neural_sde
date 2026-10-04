@@ -16,15 +16,19 @@ from amgm import config as amgm_config
 import amgm.utils.myplot as myplot
 from amgm.data.loading import load_sebx_am_data
 
-# For parallel run is necessary otherwise, torch will overload each vCPU 
+# For parallel run is necessary otherwise, torch will overload each vCPU
 # torch.set_num_threads(1)          # limit PyTorch to 1 thread for intra-op parallelism
 # torch.set_num_interop_threads(1)  # limit inter-op parallelism to 1 thread
-torch.set_num_threads(16)
-torch.set_num_interop_threads(2)
+try:
+    torch.set_num_threads(16)
+    torch.set_num_interop_threads(2)
+except RuntimeError:
+    pass
+
 
 def _resolve_seed(seed_value):
     if seed_value in (None, "random"):
-        return torch.seed() % (2**31 - 1)  
+        return torch.seed() % (2**31 - 1)
     return int(seed_value)
 
 
@@ -37,10 +41,12 @@ def _load_model_checkpoint(checkpoint_path):
         weights_only=False,
     )
     hparams = checkpoint.get("hyper_parameters")
+    hparams = dict(hparams)
+    hparams["compile_model"] = False
     if not isinstance(hparams, dict):
         raise RuntimeError("Cannot load checkpoint without hyper_parameters.")
 
-    model = NeuralSDERunner(**hparams, compile_model=False)
+    model = NeuralSDERunner(**hparams)
     state_dict = checkpoint.get("state_dict", {})
     if not isinstance(state_dict, dict):
         raise RuntimeError("Checkpoint state_dict is missing or invalid.")
@@ -66,12 +72,14 @@ def _load_model_checkpoint(checkpoint_path):
     return model
 
 
-def _build_dataset(dset_cfg, seed, batch_size): 
+def _build_dataset(dset_cfg, seed, batch_size):
     dataset = NeuralSDEDataset(**dset_cfg, rng_seed=seed)
-    L = len(dataset)    
+    L = len(dataset)
     if batch_size > L:
-        raise IndexError(f"Requested batch of size {batch_size} exceeds dataset size {L}.")
-    
+        raise IndexError(
+            f"Requested batch of size {batch_size} exceeds dataset size {L}."
+        )
+
     batch = {
         "price_window": torch.stack([dataset[i].price_window for i in range(L)], dim=0),
         "sample_min": torch.stack([dataset[i].sample_min for i in range(L)], dim=0),
@@ -80,6 +88,7 @@ def _build_dataset(dset_cfg, seed, batch_size):
 
     return dataset, batch, seed
 
+
 def _compute_features(x_window):
     x_window = x_window.detach().cpu().numpy()
     fib_levels, delta = common.calculate_fibLevels(x_window)
@@ -87,11 +96,13 @@ def _compute_features(x_window):
     features = (x_t - fib_levels) / np.maximum(delta, 1e-8)
     return torch.from_numpy(features), fib_levels
 
+
 def _compute_min_range(x_window):
     x_min = x_window.amin(dim=1, keepdim=True)
     x_max = x_window.amax(dim=1, keepdim=True)
     x_range = torch.clamp(x_max - x_min, min=1e-8)
     return x_min, x_range
+
 
 def _rollout_sde(model, batch, n_steps, dt, seed):
     gen = torch.Generator().manual_seed(int(seed))
@@ -102,7 +113,9 @@ def _rollout_sde(model, batch, n_steps, dt, seed):
     x_window_original = x_window_norm0 * x_range0 + x_min0
 
     # Keep one rollout per sample: shape [batch_size, n_steps + 1]
-    synthetic_path = [x_window_original[:, -1].detach().cpu().numpy()]  # For continuous plot visualization
+    synthetic_path = [
+        x_window_original[:, -1].detach().cpu().numpy()
+    ]  # For continuous plot visualization
     pi_path = []
     mu_path = []
     sigma_path = []
@@ -115,32 +128,40 @@ def _rollout_sde(model, batch, n_steps, dt, seed):
             f_t, _ = _compute_features(x_window)
             mu, sigma, pi = model(x_window, f_t)
 
-            noise = torch.randn(mu.shape, generator=gen, dtype=mu.dtype, device=mu.device)
-            x_next_norm = x_window[:, -1:] + mu * dt + sigma * (dt ** 0.5) * noise
+            noise = torch.randn(
+                mu.shape, generator=gen, dtype=mu.dtype, device=mu.device
+            )
+            x_next_norm = x_window[:, -1:] + mu * dt + sigma * (dt**0.5) * noise
             x_next_original = x_next_norm * x_range + x_min
 
             synthetic_path.append(x_next_original[:, 0].detach().cpu().numpy())
             pi_path.append(pi.detach().cpu().numpy())
             mu_path.append((mu * x_range).detach().cpu().numpy())
             sigma_path.append((sigma * x_range).detach().cpu().numpy())
-            x_window_original = torch.cat([x_window_original[:, 1:], x_next_original], dim=1)
+            x_window_original = torch.cat(
+                [x_window_original[:, 1:], x_next_original], dim=1
+            )
 
     return (
-            np.stack(synthetic_path, axis=1).astype(np.float32),
-            np.stack(pi_path, axis=1).astype(np.float32),
-            np.stack(mu_path, axis=1).astype(np.float32),
-            np.stack(sigma_path, axis=1).astype(np.float32),
-        )
-    
+        np.stack(synthetic_path, axis=1).astype(np.float32),
+        np.stack(pi_path, axis=1).astype(np.float32),
+        np.stack(mu_path, axis=1).astype(np.float32),
+        np.stack(sigma_path, axis=1).astype(np.float32),
+    )
+
+
 def fetch_original_price(sample, security_data, n_steps):
-    """ Fetch the original price data for a given sample from the security_data DataFrame for the next n_steps.
-    """
+    """Fetch the original price data for a given sample from the security_data DataFrame for the next n_steps."""
     test_date = pd.Timestamp(str(sample.test_dates))
     issue_id = sample.issue_ids
-    issue_rows = security_data.loc[
-        security_data["IssueId"] == issue_id,
-        ["Date", "ClAdjLoc"],
-    ].sort_values("Date").reset_index(drop=True)
+    issue_rows = (
+        security_data.loc[
+            security_data["IssueId"] == issue_id,
+            ["Date", "ClAdjLoc"],
+        ]
+        .sort_values("Date")
+        .reset_index(drop=True)
+    )
     test_matches = issue_rows.index[issue_rows["Date"] == test_date]
     if len(test_matches) == 0:
         raise ValueError(f"test_date={test_date} not found for IssueId={issue_id}")
@@ -170,21 +191,37 @@ def _save_valid_sample_artifacts(records, output_plot):
     payload["issue_id"] = np.asarray([str(r["issue_id"]) for r in records], dtype=str)
     payload["test_date"] = np.asarray([str(r["test_date"]) for r in records], dtype=str)
 
-    payload["hist"] = np.stack([np.asarray(r["hist"], dtype=np.float32) for r in records], axis=0)
-    payload["fib_levels"] = np.stack([np.asarray(r["fib_levels"], dtype=np.float32) for r in records], axis=0)
-    payload["synthetic_path"] = np.stack([np.asarray(r["synthetic_path"], dtype=np.float32) for r in records], axis=0)
+    payload["hist"] = np.stack(
+        [np.asarray(r["hist"], dtype=np.float32) for r in records], axis=0
+    )
+    payload["fib_levels"] = np.stack(
+        [np.asarray(r["fib_levels"], dtype=np.float32) for r in records], axis=0
+    )
+    payload["synthetic_path"] = np.stack(
+        [np.asarray(r["synthetic_path"], dtype=np.float32) for r in records], axis=0
+    )
 
-    original_price_arrs = [np.asarray(r["original_price"], dtype=np.float32) for r in records]
-    original_price_len = np.asarray([arr.shape[0] for arr in original_price_arrs], dtype=np.int32)
+    original_price_arrs = [
+        np.asarray(r["original_price"], dtype=np.float32) for r in records
+    ]
+    original_price_len = np.asarray(
+        [arr.shape[0] for arr in original_price_arrs], dtype=np.int32
+    )
     max_original_price_len = int(original_price_len.max())
-    original_price_padded = np.full((n, max_original_price_len), np.nan, dtype=np.float32)
+    original_price_padded = np.full(
+        (n, max_original_price_len), np.nan, dtype=np.float32
+    )
     for idx, arr in enumerate(original_price_arrs):
         original_price_padded[idx, : arr.shape[0]] = arr
     payload["original_price"] = original_price_padded
     payload["original_price_len"] = original_price_len
 
-    payload["price_min"] = np.array([float(r["price_min"]) for r in records], dtype=np.float32)
-    payload["price_range"] = np.array([float(r["price_range"]) for r in records], dtype=np.float32)
+    payload["price_min"] = np.array(
+        [float(r["price_min"]) for r in records], dtype=np.float32
+    )
+    payload["price_range"] = np.array(
+        [float(r["price_range"]) for r in records], dtype=np.float32
+    )
 
     np.savez_compressed(artifacts_file, **payload)
     return artifacts_file
@@ -230,9 +267,21 @@ def _build_mc_batch(sample, mc_paths):
         raise ValueError(f"mc_paths must be positive, got {mc_paths}.")
 
     return {
-        "price_window": sample.price_window.detach().clone().float().unsqueeze(0).repeat(mc_paths, 1),
-        "sample_min": sample.sample_min.detach().clone().float().reshape(1).repeat(mc_paths),
-        "sample_range": sample.sample_range.detach().clone().float().reshape(1).repeat(mc_paths),
+        "price_window": sample.price_window.detach()
+        .clone()
+        .float()
+        .unsqueeze(0)
+        .repeat(mc_paths, 1),
+        "sample_min": sample.sample_min.detach()
+        .clone()
+        .float()
+        .reshape(1)
+        .repeat(mc_paths),
+        "sample_range": sample.sample_range.detach()
+        .clone()
+        .float()
+        .reshape(1)
+        .repeat(mc_paths),
     }
 
 
@@ -425,7 +474,9 @@ def main_mc(
     # Do not truncate windows before the requested date can be selected.
     dset_cfg["max_windows_per_issue"] = None
 
-    configured_seed = seed_override if seed_override is not None else run_cfg.get("rng_seed")
+    configured_seed = (
+        seed_override if seed_override is not None else run_cfg.get("rng_seed")
+    )
     seed = _resolve_seed(configured_seed)
     seed_everything(seed, workers=True)
 
@@ -471,9 +522,7 @@ def main_mc(
         frames.append(
             pd.DataFrame(
                 {
-                    "IssueId": [
-                        f"{sample.issue_ids}_synthetic_MC_{path_idx:03d}"
-                    ]
+                    "IssueId": [f"{sample.issue_ids}_synthetic_MC_{path_idx:03d}"]
                     * (n_steps + 1),
                     "SourceIssueId": [str(sample.issue_ids)] * (n_steps + 1),
                     "TestDate": [str(sample.test_dates)] * (n_steps + 1),
@@ -536,14 +585,14 @@ def main_mc_multi(
         dset_cfg["num_iids"] = int(num_iids)
     dset_cfg["max_windows_per_issue"] = None
 
-    configured_seed = seed_override if seed_override is not None else run_cfg.get("rng_seed")
+    configured_seed = (
+        seed_override if seed_override is not None else run_cfg.get("rng_seed")
+    )
     seed = _resolve_seed(configured_seed)
     seed_everything(seed, workers=True)
     dataset = NeuralSDEDataset(**dset_cfg, rng_seed=seed)
 
-    target_date = (
-        str(pd.Timestamp(test_date).date()) if test_date is not None else None
-    )
+    target_date = str(pd.Timestamp(test_date).date()) if test_date is not None else None
     candidates = [
         idx
         for idx in range(len(dataset))
@@ -635,9 +684,7 @@ def main_mc_multi(
 
     security_data = load_sebx_am_data(amgm_config.am_dataset_dir)["security_data"]
     original_prices = [
-        fetch_original_price(sample, security_data, n_steps).to_numpy(
-            dtype=np.float32
-        )
+        fetch_original_price(sample, security_data, n_steps).to_numpy(dtype=np.float32)
         for sample in base_samples
     ]
 
@@ -684,11 +731,7 @@ def main_mc_multi(
     for idx, values in enumerate(original_prices):
         original_padded[idx, : len(values)] = values
 
-    synthetic_artifacts_dir = (
-        Path(__file__).resolve().parents[2] / "Data" / "Synthetic"
-    )
-    synthetic_artifacts_dir.mkdir(parents=True, exist_ok=True)
-    artifacts_file = synthetic_artifacts_dir / f"{output_plot.stem}_valid_samples.npz"
+    artifacts_file = output_plot.with_name(f"{output_plot.stem}_valid_samples.npz")
     np.savez_compressed(
         artifacts_file,
         issue_id=np.asarray([str(s.issue_ids) for s in base_samples], dtype=str),
@@ -735,14 +778,15 @@ def main_mc_multi(
     print(f"Saved MC paths CSV to: {synthetic_output_file}")
     print(f"Saved MC artifacts NPZ to: {artifacts_file}")
     print(
-        f"Saved {len(ensemble_outputs)} MC ensemble plots under: "
-        f"{output_plot.parent}"
+        f"Saved {len(ensemble_outputs)} MC ensemble plots under: {output_plot.parent}"
     )
     print(f"Sanity-valid MC paths: {int(is_valid.sum())}/{len(is_valid)}")
     return synthetic_paths
 
 
-def main(trainer_cfg, checkpoint_path, batch_size, n_steps, output_plot, wdir, model_type):
+def main(
+    trainer_cfg, checkpoint_path, batch_size, n_steps, output_plot, wdir, model_type
+):
     run_cfg = trainer_cfg["run_cfg"]
     dset_cfg = trainer_cfg["dset_cfg"]
 
@@ -756,15 +800,19 @@ def main(trainer_cfg, checkpoint_path, batch_size, n_steps, output_plot, wdir, m
     model.eval()
 
     dt = float(dset_cfg.get("dt", 1.0))
-    synthetic_paths,  pi_paths, mu_paths, sigma_paths = _rollout_sde(model, batch, n_steps=n_steps, dt=dt, seed=seed)
-    
+    synthetic_paths, pi_paths, mu_paths, sigma_paths = _rollout_sde(
+        model, batch, n_steps=n_steps, dt=dt, seed=seed
+    )
+
     raw_dataset = load_sebx_am_data(amgm_config.am_dataset_dir)
     security_data = raw_dataset["security_data"]
-    
+
     output_plot = Path(output_plot)
     synthetic_frames = []
     valid_sample_artifacts = []
-    shuffled_indices = torch.randperm(len(dataset), generator=torch.Generator().manual_seed(seed)).tolist()
+    shuffled_indices = torch.randperm(
+        len(dataset), generator=torch.Generator().manual_seed(seed)
+    ).tolist()
     for i, sample_idx in enumerate(shuffled_indices):
         if len(synthetic_frames) >= batch_size:
             break
@@ -796,25 +844,45 @@ def main(trainer_cfg, checkpoint_path, batch_size, n_steps, output_plot, wdir, m
 
             synthetic_iid = f"{sample.issue_ids}_synthetic_{i}"
             synthetic_frames.append(
-                pd.DataFrame({  "IssueId": [synthetic_iid] * (n_steps + 1),
-                                "Date": pd.bdate_range(start=pd.Timestamp(str(sample.test_dates)), periods=n_steps + 1),
-                                "ClAdjLoc": synthetic_path,}))
+                pd.DataFrame(
+                    {
+                        "IssueId": [synthetic_iid] * (n_steps + 1),
+                        "Date": pd.bdate_range(
+                            start=pd.Timestamp(str(sample.test_dates)),
+                            periods=n_steps + 1,
+                        ),
+                        "ClAdjLoc": synthetic_path,
+                    }
+                )
+            )
             if save_rollout_plots:
-                myplot.synthetic_NSDE_path(sample, synthetic_path, original_price, wdir=wdir, output_plot=output_plot)
+                myplot.synthetic_NSDE_path(
+                    sample,
+                    synthetic_path,
+                    original_price,
+                    wdir=wdir,
+                    output_plot=output_plot,
+                )
         else:
             print(f"Sanity check for sample {i} completed with result: {keep_sample}")
 
     synthetic_df = pd.concat(synthetic_frames, ignore_index=True)
     synthetic_output_dir = Path(__file__).resolve().parents[2] / "Data" / "Synthetic"
     synthetic_output_dir.mkdir(parents=True, exist_ok=True)
-    synthetic_output_file = synthetic_output_dir / f"{output_plot.stem}_paths_{model_type}.csv"
+    synthetic_output_file = (
+        synthetic_output_dir / f"{output_plot.stem}_paths_{model_type}.csv"
+    )
     synthetic_df.to_csv(synthetic_output_file, index=False)
-    valid_samples_file = _save_valid_sample_artifacts(valid_sample_artifacts, output_plot)
-    
+    valid_samples_file = _save_valid_sample_artifacts(
+        valid_sample_artifacts, output_plot
+    )
+
     print(f"Saved synthetic paths .csv to: {synthetic_output_file}")
     if valid_samples_file is not None:
         print(f"Saved valid sample artifacts .npz to: {valid_samples_file}")
-    print(f"Saved {len(synthetic_frames)} out of {len(synthetic_paths)} synthetic rollouts under: {output_plot.parent}")
+    print(
+        f"Saved {len(synthetic_frames)} out of {len(synthetic_paths)} synthetic rollouts under: {output_plot.parent}"
+    )
 
     if len(synthetic_frames) < batch_size:
         logging.warning(
@@ -823,13 +891,14 @@ def main(trainer_cfg, checkpoint_path, batch_size, n_steps, output_plot, wdir, m
             len(synthetic_frames),
             batch_size,
         )
-        
+
     return synthetic_paths
+
 
 if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s | %(name)s | %(levelname)s | %(message)s"
+        format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
     )
 
     parser = argparse.ArgumentParser(
@@ -857,7 +926,9 @@ if __name__ == "__main__":
     )
     parser.add_argument("--issue-id", "--issue_id", dest="issue_id")
     parser.add_argument("--test-date", "--test_date", dest="test_date")
-    parser.add_argument("--mc-paths", "--mc_paths", dest="mc_paths", type=int, default=20)
+    parser.add_argument(
+        "--mc-paths", "--mc_paths", dest="mc_paths", type=int, default=20
+    )
     parser.add_argument("--batch-size", type=int, default=10)
     parser.add_argument("--n-steps", type=int, default=100)
     parser.add_argument(
@@ -886,7 +957,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     cfg_path = f"trainer_cfg.neural_SDE.{args.trainer_cfg}"
-    cfg_module = importlib.import_module(cfg_path, package=__package__ or "experiments.neural_SDE")
+    cfg_module = importlib.import_module(
+        cfg_path, package=__package__ or "experiments.neural_SDE"
+    )
     trainer_cfg = cfg_module.get_trainer_cfg()
 
     if args.seed is not None:
@@ -898,7 +971,9 @@ if __name__ == "__main__":
 
     batch_size = args.batch_size
     n_steps = args.n_steps
-    checkpoint_name = args.checkpoint_name + (".ckpt" if not args.checkpoint_name.endswith(".ckpt") else "")
+    checkpoint_name = args.checkpoint_name + (
+        ".ckpt" if not args.checkpoint_name.endswith(".ckpt") else ""
+    )
     model_type = checkpoint_name.split("_")[-1].split(".")[0]
     save_rollout_plots = args.save_rollout_plots
 
@@ -924,16 +999,12 @@ if __name__ == "__main__":
         output_plot = output_dir / "synthetic_rollout.png"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # time counter starts 
+    # time counter starts
     start_time = time.time()
     if args.mode == "mc":
-        configured_num_iids = int(
-            trainer_cfg["dset_cfg"].get("num_iids", 50)
-        )
+        configured_num_iids = int(trainer_cfg["dset_cfg"].get("num_iids", 50))
         mc_num_iids = (
-            args.num_iids
-            if args.num_iids is not None
-            else max(2, configured_num_iids)
+            args.num_iids if args.num_iids is not None else max(2, configured_num_iids)
         )
         main_mc_multi(
             trainer_cfg,

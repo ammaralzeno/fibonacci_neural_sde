@@ -3,6 +3,7 @@ import torch
 from amgm.utils import instantiate, normalize_hparams
 import torch.nn.functional as F
 import math
+from amgm.models.neural_SDE.gate_regularizers import gate_reward, balance_loss as compute_balance_loss
 
 
 class EntropyBetaScheduler:
@@ -55,7 +56,9 @@ class TemperatureScheduler:
         elif self.current_step >= (self.warmup_steps + self.decay_steps):
             t = self.t_min
         else:
-            progress = (self.current_step - self.warmup_steps) / max(1, self.decay_steps)
+            progress = (self.current_step - self.warmup_steps) / max(
+                1, self.decay_steps
+            )
             cosine_decay = 0.5 * (1.0 + math.cos(math.pi * progress))
             t = self.t_min + (self.t_max - self.t_min) * cosine_decay
 
@@ -68,6 +71,7 @@ class TemperatureScheduler:
     def load_state_dict(self, state_dict):
         self.current_step = int(state_dict.get("current_step", 0))
 
+
 class NeuralSDERunner(LightningModule):
     def __init__(
         self,
@@ -78,6 +82,8 @@ class NeuralSDERunner(LightningModule):
         acc_cfg,
         optim_cfg,
         sched_cfg,
+        gate_reg_mode="regional_variance",
+        adaptive_entropy_clip=0.1,
         entropy_beta=0.1,
         entropy_beta_min=1e-3,
         entropy_beta_warmup_steps=200,
@@ -87,6 +93,7 @@ class NeuralSDERunner(LightningModule):
         gate_temperature_warmup_steps=200,
         gate_temperature_decay_steps=800,
         expert_balance_lambda=0.1,
+        checkpoint_monitor="val/loss",
         compile_model=True,
     ):
         super().__init__()
@@ -105,6 +112,9 @@ class NeuralSDERunner(LightningModule):
         if isinstance(optim_cfg, dict):
             self.lr = optim_cfg.get("lr", None)
 
+        self.gate_reg_mode = gate_reg_mode
+        self.adaptive_entropy_clip = float(adaptive_entropy_clip)
+        self.checkpoint_monitor = checkpoint_monitor
         self.entropy_beta = float(entropy_beta)
         self.entropy_beta_min = float(
             entropy_beta if entropy_beta_min is None else entropy_beta_min
@@ -187,35 +197,31 @@ class NeuralSDERunner(LightningModule):
         f_m = torch.mean(
             pi, dim=0
         )  # Average utilization of each expert across the batch
-        # CV Loss: 0 when f_m = [1/3, 1/3, 1/3], scales gracefully as load unbalances
-        balance_loss = torch.sum((f_m - (1.0 / 3.0)) ** 2)
-        pi_var_per_expert = torch.var(pi, dim=0, unbiased=False)
-        mean_pi_var = torch.mean(pi_var_per_expert)
-
-        # Total Loss: Penalize low entropy to prevent premature expert collapse (Adaptive)
         beta = self.entropy_beta if entropy_beta is None else float(entropy_beta)
 
-        # --- Adaptive Entropy Implementation ---
-        target_f_m = 1.0 / pi.shape[-1]
-        # utilization_ratio < 1 if expert is underutilized. Clamped to 0.1 to cap the max multiplier at 10x beta.
-        utilization_ratio = (f_m / target_f_m).clamp(min=0.1, max=1.0)
-        per_expert_beta = beta / utilization_ratio  # (3,)
-
-        log_pi = torch.log(pi + 1e-8)
-        adaptive_entropy_per_sample = -torch.sum(
-            per_expert_beta.unsqueeze(0) * pi * log_pi, dim=-1
+        # Dynamic gating reward dispatch based on config mode
+        gate_reg_term = gate_reward(
+            self.gate_reg_mode, pi, beta,
+            adaptive_entropy_clip=self.adaptive_entropy_clip
         )
-        entropy_term = torch.mean(adaptive_entropy_per_sample)
-        # ---------------------------------------
+        
+        balance_loss = compute_balance_loss(pi)
         balance_term = self.expert_balance_lambda * balance_loss
 
-        loss = sde_loss - entropy_term + balance_term
+        # We subtract gate_reg_term to maximize the reward
+        loss = sde_loss - gate_reg_term + balance_term
+
+        # Re-compute these strictly for backwards-compatible logging
+        entropy_term = beta * mean_entropy
+        pi_var_per_expert = torch.var(pi, dim=0, unbiased=False)
+        mean_pi_var = torch.mean(pi_var_per_expert)
 
         x_tp1_pred = x_t + mu * self.default_dt  # mean prediction for x_tp1
 
         return {
             "loss": loss,
             "sde_loss": sde_loss,
+            "gate_reg_term": gate_reg_term,
             "entropy_term": entropy_term,
             "balance_term": balance_term,
             "mean_entropy": mean_entropy,
@@ -237,15 +243,23 @@ class NeuralSDERunner(LightningModule):
     def training_step(self, batch, batch_idx):
         if self.entropy_beta_scheduler is not None:
             self.entropy_beta = self.entropy_beta_scheduler.step()
-            
+
         if self.temperature_scheduler is not None:
             current_temp = self.temperature_scheduler.step()
             # Handle torch.compile wrapping safely
             if hasattr(self.model, "gate_temperature"):
                 self.model.gate_temperature = current_temp
-            elif hasattr(self.model, "_orig_mod") and hasattr(self.model._orig_mod, "gate_temperature"):
+            elif hasattr(self.model, "_orig_mod") and hasattr(
+                self.model._orig_mod, "gate_temperature"
+            ):
                 self.model._orig_mod.gate_temperature = current_temp
-            self.log("train/gate_temperature", current_temp, prog_bar=False, on_step=True, on_epoch=False)
+            self.log(
+                "train/gate_temperature",
+                current_temp,
+                prog_bar=False,
+                on_step=True,
+                on_epoch=False,
+            )
 
         out = self._compute_loss(batch, entropy_beta=self.entropy_beta)
         loss = out["loss"]
@@ -262,6 +276,13 @@ class NeuralSDERunner(LightningModule):
         self.log(
             "train/loss_sde",
             out["sde_loss"],
+            prog_bar=False,
+            on_step=True,
+            on_epoch=True,
+        )
+        self.log(
+            "train/loss_gate_reg_term",
+            out["gate_reg_term"],
             prog_bar=False,
             on_step=True,
             on_epoch=True,
@@ -340,6 +361,13 @@ class NeuralSDERunner(LightningModule):
         self.log(
             "val/loss_sde",
             out["sde_loss"],
+            prog_bar=False,
+            on_step=False,
+            on_epoch=True,
+        )
+        self.log(
+            "val/loss_gate_reg_term",
+            out["gate_reg_term"],
             prog_bar=False,
             on_step=False,
             on_epoch=True,
@@ -440,7 +468,9 @@ class NeuralSDERunner(LightningModule):
                 self.entropy_beta_scheduler.state_dict()
             )
         if self.temperature_scheduler is not None:
-            checkpoint["temperature_scheduler"] = self.temperature_scheduler.state_dict()
+            checkpoint["temperature_scheduler"] = (
+                self.temperature_scheduler.state_dict()
+            )
 
     def on_load_checkpoint(self, checkpoint):
         if (
@@ -457,3 +487,21 @@ class NeuralSDERunner(LightningModule):
             self.temperature_scheduler.load_state_dict(
                 checkpoint["temperature_scheduler"]
             )
+            # Evaluate scheduler at current step without advancing it
+            if self.temperature_scheduler.current_step < self.temperature_scheduler.warmup_steps:
+                t = self.temperature_scheduler.t_max
+            elif self.temperature_scheduler.current_step >= (self.temperature_scheduler.warmup_steps + self.temperature_scheduler.decay_steps):
+                t = self.temperature_scheduler.t_min
+            else:
+                progress = (self.temperature_scheduler.current_step - self.temperature_scheduler.warmup_steps) / max(
+                    1, self.temperature_scheduler.decay_steps
+                )
+                cosine_decay = 0.5 * (1.0 + math.cos(math.pi * progress))
+                t = self.temperature_scheduler.t_min + (self.temperature_scheduler.t_max - self.temperature_scheduler.t_min) * cosine_decay
+            
+            if hasattr(self.model, "gate_temperature"):
+                self.model.gate_temperature = float(t)
+            elif hasattr(self.model, "_orig_mod") and hasattr(
+                self.model._orig_mod, "gate_temperature"
+            ):
+                self.model._orig_mod.gate_temperature = float(t)

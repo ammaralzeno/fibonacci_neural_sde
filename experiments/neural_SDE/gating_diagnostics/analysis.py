@@ -49,6 +49,7 @@ def load_moe_checkpoint(path):
             key = key.replace("model.backbone.", "model.encoder.", 1)
         state[key] = value
     runner.load_state_dict(state, strict=True)
+    runner.on_load_checkpoint(checkpoint)
     return runner.eval(), checkpoint
 
 
