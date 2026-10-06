@@ -20,7 +20,7 @@ def get_trainer_cfg():
 
     dset_cfg = dict(
         issue_ids=[],  # ["00100401"],
-        num_iids=1000,  # Only is read if issue_ids is None or empty, otherwise ignored
+        num_iids=100,  # Only is read if issue_ids is None or empty, otherwise ignored
         start_date="2014-12-31",
         end_date="2020-12-31",
         lookback_window=252,
@@ -48,15 +48,19 @@ def get_trainer_cfg():
         acc_cfg=dict(_target_=MeanAbsoluteError),
         optim_cfg=dict(_target_=torch.optim.Adam, lr=1e-3, weight_decay=1e-5),
         sched_cfg=None,
-        entropy_beta=0.1,  # Regularization strength for entropy loss in MoE model. Set to 0.0 to disable entropy regularization.
+        gate_reg_mode="entropy",
+        adaptive_entropy_clip=0.1,
+        entropy_beta=0.1,
         entropy_beta_min=1e-2,
         entropy_beta_warmup_steps=200,
-        entropy_beta_decay_steps=800,  # Set to 0 to have a constant entropy_beta value during training
-        gate_temperature_max=5.0,
-        gate_temperature_min=0.5,
+        entropy_beta_decay_steps=800,
+        gate_temperature_max=1.0,
+        gate_temperature_min=1.0,
         gate_temperature_warmup_steps=200,
-        gate_temperature_decay_steps=800,
-        expert_balance_lambda=0,
+        gate_temperature_decay_steps=0,
+        expert_balance_lambda=0.0,
+        checkpoint_monitor="val/loss",
+        compile_model=False,
     )
 
     return trainer_cfg
