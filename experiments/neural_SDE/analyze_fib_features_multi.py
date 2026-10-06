@@ -433,6 +433,80 @@ def write_findings(output_dir, basket, dates, mask, cooc, xcorr_summary, fsm_cou
 
 
 # ---------------------------------------------------------------------------
+# Cross-basket comparison
+# ---------------------------------------------------------------------------
+
+# Basket name -> issue_ids (None = the default basket from US_Stocks_Multi)
+EXP2_BASKETS = {
+    "same-sector": None,
+    "concentrated": ["00177301", "00187801", "00169001", "00116101"],
+    "diversified": ["00138001", "00141402", "00107801", "00116101"],
+}
+
+
+def plot_basket_comparison(basket_stats, output_file):
+    """Exp 2 across baskets: co-occurrence lift and lead/lag peak per basket."""
+    names = list(basket_stats)
+    lifts = [basket_stats[n]["lift"] for n in names]
+    peaks = [basket_stats[n]["peak_abs_xcorr"] for n in names]
+    x = np.arange(len(names))
+
+    fig, axes = plt.subplots(1, 2, figsize=(9.5, 3.8))
+    for ax, values, title, ylabel, ref in [
+        (axes[0], lifts, "Do assets reach Fibonacci levels simultaneously?", "mean pairwise co-occurrence lift", 1.0),
+        (axes[1], peaks, "Lead/lag of level approaches across assets", "peak mean pairwise |corr|", 0.0),
+    ]:
+        ax.bar(x, values, color="tab:blue", width=0.55)
+        ax.axhline(ref, color="black", linewidth=0.8)
+        for xi, v in zip(x, values):
+            ax.text(xi, v + 0.02 * max(values), f"{v:.2f}", ha="center", fontsize=9)
+        ax.set_xticks(x, names, fontsize=9)
+        ax.set_ylabel(ylabel)
+        ax.set_title(title, fontsize=10)
+        ax.grid(True, alpha=0.3, axis="y")
+    axes[0].annotate("1.0 = independence", xy=(0.02, 1.01), xycoords=("axes fraction", "data"), fontsize=8)
+    fig.suptitle("Experiment 2: Fibonacci simultaneity vs basket dependency strength", fontsize=12)
+    fig.tight_layout()
+    fig.savefig(output_file, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
+def main_fib_basket_comparison(output_dir=None, eps=PAPER_BAND, max_lag=10):
+    """Exp 2 basket comparison: lift + lead/lag peak per basket in one figure."""
+    from experiments.neural_SDE.trainer_cfg.neural_SDE.US_Stocks_Multi import get_trainer_cfg
+
+    if output_dir is None:
+        output_dir = amgm_config.work_dir("neural_SDE") / "logs" / "exp2_fib_analysis"
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    stats = {}
+    for name, issue_ids in EXP2_BASKETS.items():
+        dset_cfg = dict(get_trainer_cfg()["dset_cfg"])
+        if issue_ids is not None:
+            dset_cfg["issue_ids"] = issue_ids
+        dataset = MultiAssetNeuralSDEDataset(**dset_cfg, rng_seed=42)
+        mask = near_level_mask(dataset.features.numpy(), eps)
+
+        lift = pairwise_cooccurrence(mask)["lift"]
+        lift_off = lift[~np.eye(lift.shape[0], dtype=bool)]
+        lags, xcorr = lagged_indicator_xcorr(mask, max_lag=max_lag)
+        mean_x = np.nanmean(xcorr[:, ~np.eye(lift.shape[0], dtype=bool)].reshape(len(lags), -1), axis=1)
+        peak = int(np.nanargmax(np.abs(mean_x)))
+        stats[name] = {
+            "lift": float(lift_off[np.isfinite(lift_off)].mean()),
+            "peak_abs_xcorr": float(abs(mean_x[peak])),
+            "peak_lag": int(lags[peak]),
+        }
+
+    plot_basket_comparison(stats, output_dir / "exp2_basket_comparison.png")
+    for name, s in stats.items():
+        print(f"{name}: lift={s['lift']:.2f}, peak |xcorr|={s['peak_abs_xcorr']:.3f} at lag {s['peak_lag']}")
+    print(f"Exp 2 basket comparison written to: {output_dir}")
+    return stats
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -511,7 +585,13 @@ if __name__ == "__main__":
     parser.add_argument("--max-lag", type=int, default=10)
     parser.add_argument("--output-dir", default=None, help="Defaults to logs/exp2_fib_analysis.")
     parser.add_argument("--issue-ids", nargs="*", default=None, help="Override the basket of IssueIds from the config.")
+    parser.add_argument("--basket-comparison", action="store_true",
+                        help="Compare the baskets of EXP2_BASKETS in one figure instead of the per-basket analysis.")
     args = parser.parse_args()
+
+    if args.basket_comparison:
+        main_fib_basket_comparison(output_dir=args.output_dir, eps=args.eps, max_lag=args.max_lag)
+        raise SystemExit(0)
 
     cfg_path = f"trainer_cfg.neural_SDE.{args.trainer_cfg}"
     cfg_module = importlib.import_module(cfg_path, package="experiments.neural_SDE")
