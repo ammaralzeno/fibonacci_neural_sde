@@ -17,6 +17,13 @@ FIGURES_DIR = REPO_ROOT / "workspace" / "portfolio_analysis" / "figures"
 DIVERSIFIED_FILE = RESULTS_DIR / "diversified_rolling_correlations.csv"
 CONCENTRATED_FILE = RESULTS_DIR / "concentrated_rolling_correlations.csv"
 
+DIVERSIFIED_LABELS = {
+    "00138001": "Energy",
+    "00107801": "Health Care",
+    "00141402": "Financials",
+    "00116101": "Information Technology"
+}
+
 
 def load_rolling_correlations(file_path):
 
@@ -47,7 +54,13 @@ def plot_pairwise_correlations(portfolio_name, rolling_data):
     fig, ax = plt.subplots(figsize=(13, 6))
 
     for pair in rolling_data.columns:
-        label = pair.replace("__", " / ")
+        asset_1, asset_2 = pair.split("__")
+
+        if portfolio_name == "diversified":
+            label = (f"{DIVERSIFIED_LABELS[asset_1]} / "f"{DIVERSIFIED_LABELS[asset_2]}")
+        else:
+            label = f"{asset_1} / {asset_2}"
+
         ax.plot(rolling_data.index, rolling_data[pair], label=label, linewidth=1.3, alpha=0.85)
 
         
