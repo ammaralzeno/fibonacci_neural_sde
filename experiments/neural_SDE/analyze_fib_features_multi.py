@@ -380,55 +380,33 @@ def plot_conditional_returns(cond_stats, basket, output_heatmap, output_overlays
 
 
 def write_findings(output_dir, basket, dates, mask, cooc, xcorr_summary, fsm_counts, cond_stats, top_pairs, eps):
-    """Slide-ready Exp 2 findings with the key numbers and figure references."""
+    """One-screen Exp 2 findings: headline number(s) per check (a)/(b)/(c)."""
     n = len(basket)
     off = ~np.eye(n, dtype=bool)
     lift_off = cooc["lift"][off]
     lift_off = lift_off[np.isfinite(lift_off)]
+    rates = cooc["p_near"]
+    bounce = [c["Bounce"] for c in fsm_counts]
+    hover = [c["Hover"] for c in fsm_counts]
 
     lines = [
-        "# Experiment 2 — Multi-asset Fibonacci features: findings",
+        f"# Exp 2 findings — {', '.join(basket)}",
         "",
-        f"Basket ({n} assets): {', '.join(basket)}",
-        f"Aligned calendar: {dates[0]} .. {dates[-1]}; rolling 252d windows: {mask.shape[0]} window-ends.",
-        f"Near-level definition: |D| < {eps} (paper's +/-0.02 band, normalized by window range).",
+        f"Aligned {dates[0]} .. {dates[-1]}, {mask.shape[0]} windows; near-level = |D| < {eps}.",
         "",
-        "## (a) Are Fibonacci levels meaningful independently for each asset?",
-        "",
-        f"- Near-level rate per asset: " + ", ".join(f"{b}: {p:.1%}" for b, p in zip(basket, cooc["p_near"])),
-        "- FSM interaction events on real data (Bounce/Break/Hover/Timeout per asset):",
+        f"(a) Levels meaningful per asset: near-level rate {rates.min():.0%}-{rates.max():.0%}; "
+        f"FSM events on every asset (Bounce {min(bounce)}-{max(bounce)}, Hover {min(hover)}-{max(hover)} each).",
+        f"(b) Simultaneity: co-occurrence lift {lift_off.mean():.2f} (1.0 = independence); "
+        f"lead/lag peaks at lag {xcorr_summary['peak_lag']} (|corr| = {abs(xcorr_summary['peak_abs_xcorr']):.3f}).",
+        "(c) Cross-asset effects, top KS pairs (A near level -> B's next-day returns):",
     ]
-    for b, c in zip(basket, fsm_counts):
-        lines.append(f"  - {b}: " + ", ".join(f"{k}={v}" for k, v in c.items()))
-    lines += [
-        "",
-        "Figures: `figA_simultaneous_levels.png`, `figB_distance_heatmap.png`, "
-        "`check_a_signed_distance_hist.png`, `check_a_fsm_events.png`.",
-        "",
-        "## (b) Do different assets reach Fibonacci levels simultaneously?",
-        "",
-        f"- Mean pairwise co-occurrence lift: {lift_off.mean():.2f} "
-        f"(1.0 = independence; >1 = simultaneous more often than chance).",
-        f"- Max lift: {np.nanmax(lift_off):.2f}; min lift: {np.nanmin(lift_off):.2f}.",
-        f"- Lead/lag: mean pairwise indicator cross-correlation peaks at lag "
-        f"{xcorr_summary['peak_lag']} days (|corr|={abs(xcorr_summary['peak_abs_xcorr']):.3f}).",
-        "",
-        "Figures: `check_b_cooccurrence_lift.png`, `check_b_lagged_xcorr.png`.",
-        "",
-        "## (c) Do Fibonacci events in one asset coincide with movements in another?",
-        "",
-        "Ordered pairs (A near level -> B's next-day returns), top KS statistic pairs:",
-    ]
-    for a, b, ks_val in top_pairs:
+    for a, b, ks_val in top_pairs[:2]:
         s = cond_stats[(a, b)]
         lines.append(
-            f"- {basket[a]} -> {basket[b]}: KS={ks_val:.2f} (p={s['ks_p']:.3f}), n={s['n_cond']}, "
+            f"    {basket[a]} -> {basket[b]}: KS = {ks_val:.2f} (p = {s['ks_p']:.3f}), "
             f"mean|ret| {s['mean_abs_cond']:.4f} vs {s['mean_abs_uncond']:.4f} unconditional"
         )
-    lines += [
-        "",
-        "Figures: `check_c_conditional_ks_heatmap.png`, `check_c_conditional_overlays.png`.",
-    ]
+    lines += ["", "Figures: `figA_simultaneous_levels.png`; combined: `../exp2_basket_comparison.png`."]
     (Path(output_dir) / "exp2_findings.md").write_text("\n".join(lines) + "\n")
 
 

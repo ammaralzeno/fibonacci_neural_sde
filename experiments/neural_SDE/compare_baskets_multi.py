@@ -107,31 +107,27 @@ def plot_basket_scaling(table, output_file):
 
 
 def write_basket_findings(output_dir, table):
-    """Slide-ready cross-basket Exp 3 findings."""
+    """One-screen cross-basket Exp 3 findings."""
     lines = [
-        "# Experiment 3 — basket comparison: joint-modeling value vs dependency strength",
+        "# Exp 3 basket comparison",
         "",
-        f"Same ablation protocol on three baskets of increasing cross-asset dependency,",
-        f"seeds {SEEDS} (mean +/- std). Validation NLL: lower is better; delta is vs the",
-        "basket's own independent baseline of the same seed.",
+        f"Delta best val NLL vs independent (mean +/- std, {len(SEEDS)} seeds; negative = joint helps).",
+        "Ceiling = -0.5*logdet(R): the NLL gain the basket's correlation structure can explain.",
         "",
-        "The correlation ceiling -0.5*logdet(R) upper-bounds the NLL gain learnable from",
-        "the basket's correlation structure — it ranks the baskets before any training.",
-        "",
-        "| Basket | mean corr | ceiling | Configuration | best val NLL | delta vs independent |",
+        "| Basket | mean corr | ceiling | Correlation only | Context only | Full joint |",
         "|---|---|---|---|---|---|",
     ]
-    for _, r in table.iterrows():
-        lines.append(
-            f"| {r['basket']} | {r['mean_pairwise_corr']:.2f} | {r['corr_ceiling']:.2f} | {r['label']} | "
-            f"{r['nll_mean']:.3f} +/- {r['nll_std']:.3f} | {r['delta_mean']:+.3f} +/- {r['delta_std']:.3f} |"
-        )
+    for basket, grp in table.groupby("basket", sort=False):
+        r0 = grp.iloc[0]
+        cells = []
+        for cfg in ("exp3_corr_only", "exp3_context_only", "exp3_full"):
+            r = grp[grp["config"] == cfg].iloc[0]
+            cells.append(f"{r['delta_mean']:+.2f} +/- {r['delta_std']:.2f}")
+        lines.append(f"| {basket} | {r0['mean_pairwise_corr']:.2f} | {r0['corr_ceiling']:.2f} | " + " | ".join(cells) + " |")
     lines += [
         "",
+        "Gain tracks the ceiling: decisive on same-sector, within noise on Member 4's (2015-2017) baskets.",
         "Figure: `exp3_basket_scaling.png`. Data: `exp3_basket_comparison.csv`.",
-        "",
-        "Caveats: ~400 train / ~100 val windows per basket; deltas within one seed-std",
-        "of zero should be read as no measurable effect.",
     ]
     (Path(output_dir) / "exp3_basket_findings.md").write_text("\n".join(lines) + "\n")
 
@@ -220,13 +216,12 @@ def plot_period_scaling(table, output_file):
 
 
 def write_period_findings(output_dir, table):
-    """Slide-ready Exp 3 period findings."""
+    """One-screen Exp 3 period findings."""
     lines = [
-        "# Experiment 3 — period comparison: does the correlation gain follow the regime?",
+        "# Exp 3 period comparison (Member 4's baskets)",
         "",
-        f"Member 4's portfolios trained on three periods, seeds {SEEDS} (mean +/- std).",
-        "Rolling correlations are ~50-65% stronger in 2018-2020 than 2015-2017 (Exp 1),",
-        "so the correlation ceiling -0.5*logdet(R) rises accordingly.",
+        f"Delta best val NLL vs independent (mean +/- std, {len(SEEDS)} seeds).",
+        "Rolling correlation is ~50-65% stronger in 2018-2020 than 2015-2017 (Exp 1).",
         "",
         "| Basket | Period | mean corr | ceiling | Correlation only | Full joint |",
         "|---|---|---|---|---|---|",

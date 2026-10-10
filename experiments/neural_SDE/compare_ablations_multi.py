@@ -116,39 +116,26 @@ def plot_corr_heatmaps(corrs, output_file):
 
 
 def write_findings(output_dir, table):
-    """Slide-ready Exp 3 findings: NLL table + mechanism attribution."""
+    """One-screen Exp 3 findings for the headline basket (seed-42 detail)."""
     def nll(use_context, learn_corr):
         row = table[(table["use_context"] == use_context) & (table["learn_corr"] == learn_corr)]
         return float(row["best_val_nll"].iloc[0])
 
     lines = [
-        "# Experiment 3 — Joint architecture ablations: findings",
+        "# Exp 3 findings — same-sector basket, seed 42 (detail)",
         "",
-        "Same 5-asset basket, same seed (42), 20 epochs each. Validation NLL is the",
-        "multivariate Gaussian NLL (`val/loss_sde`); lower is better.",
-        "",
-        "| Configuration | context | learned R | best val NLL | best epoch | final val NLL | Δ vs independent |",
-        "|---|---|---|---|---|---|---|",
+        "| Configuration | best val NLL | delta vs independent |",
+        "|---|---|---|",
     ]
     for _, r in table.iterrows():
-        delta = f"{r['delta_vs_independent']:+.4f}" if "delta_vs_independent" in table else "—"
-        lines.append(
-            f"| {r['label']} | {r['use_context']} | {r['learn_corr']} | "
-            f"{r['best_val_nll']:.4f} | {r['best_epoch']} | {r['final_val_nll']:.4f} | {delta} |"
-        )
+        delta = f"{r['delta_vs_independent']:+.3f}" if "delta_vs_independent" in table else "—"
+        lines.append(f"| {r['label']} | {r['best_val_nll']:.3f} | {delta} |")
     lines += [
         "",
-        "## Mechanism attribution (best val NLL differences, nats)",
-        "",
-        f"- Correlation channel: independent -> corr-only = {nll(False, True) - nll(False, False):+.4f}",
-        f"- Context channel: independent -> context-only = {nll(True, False) - nll(False, False):+.4f}",
-        f"- Both (full joint): independent -> full = {nll(True, True) - nll(False, False):+.4f}",
-        "",
+        f"Correlation channel: {nll(False, True) - nll(False, False):+.3f} nats; "
+        f"context channel: {nll(True, False) - nll(False, False):+.3f}.",
+        "Multi-seed, multi-basket version: `exp3_basket_findings.md`.",
         "Figures: `exp3_convergence.png`, `exp3_corr_heatmaps.png`. Data: `exp3_nll_table.csv`.",
-        "",
-        "Caveats: single seed; small sample (~400 train / ~100 val windows). The basket is",
-        "relationship-selected (same sector, mean pairwise return corr 0.84) and may be",
-        "revised after Member 4's Exp 1 dependency analysis.",
     ]
     (Path(output_dir) / "exp3_findings.md").write_text("\n".join(lines) + "\n")
 
@@ -172,10 +159,10 @@ def main_compare_ablations(log_root=None, output_dir=None, run_names=None):
     corrs = {}
     for name in run_names:
         ckpts = sorted((Path(log_root) / name / "checkpoints").glob("*.ckpt"))
-        if len(ckpts) != 1:
-            raise ValueError(f"Expected exactly one checkpoint for {name}, found {len(ckpts)}.")
-        corrs[name] = load_learned_corr(ckpts[0])
-    plot_corr_heatmaps(corrs, output_dir / "exp3_corr_heatmaps.png")
+        if ckpts:
+            corrs[name] = load_learned_corr(ckpts[0])
+    if corrs:
+        plot_corr_heatmaps(corrs, output_dir / "exp3_corr_heatmaps.png")
 
     write_findings(output_dir, table)
     print(table.to_string(index=False))

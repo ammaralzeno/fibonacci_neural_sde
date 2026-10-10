@@ -1,8 +1,7 @@
-# Experiment 3 — period comparison: does the correlation gain follow the regime?
+# Exp 3 period comparison (Member 4's baskets)
 
-Member 4's portfolios trained on three periods, seeds (42, 43, 44, 45, 46, 47) (mean +/- std).
-Rolling correlations are ~50-65% stronger in 2018-2020 than 2015-2017 (Exp 1),
-so the correlation ceiling -0.5*logdet(R) rises accordingly.
+Delta best val NLL vs independent (mean +/- std, 6 seeds).
+Rolling correlation is ~50-65% stronger in 2018-2020 than 2015-2017 (Exp 1).
 
 | Basket | Period | mean corr | ceiling | Correlation only | Full joint |
 |---|---|---|---|---|---|
