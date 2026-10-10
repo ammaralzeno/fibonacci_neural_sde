@@ -175,7 +175,7 @@ def main_mc_multi_asset(
 ):
     """Generate correlated MC rollouts for several forecast origins of the basket.
 
-    Artifacts (Member 4 schema) in Data/Synthetic: NPZ of all paths + inputs,
+    Artifacts in Data/Synthetic: NPZ of all paths + inputs,
     long-format paths CSV, and the real-vs-synthetic correlation sanity plot.
     """
     if n_conditions <= 0 or mc_paths <= 0:
@@ -249,7 +249,7 @@ def main_mc_multi_asset(
 
     learned_corr = model.model.correlation_matrix().detach().cpu().numpy().astype(np.float32)
 
-    # NPZ artifact (Member 4 schema)
+    # NPZ artifact
     synthetic_artifacts_dir = Path(__file__).resolve().parents[2] / "Data" / "Synthetic"
     synthetic_artifacts_dir.mkdir(parents=True, exist_ok=True)
     artifacts_file = synthetic_artifacts_dir / "synthetic_rollout_MC_multi_valid_samples.npz"

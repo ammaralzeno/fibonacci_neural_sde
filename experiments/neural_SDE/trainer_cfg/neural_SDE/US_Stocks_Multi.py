@@ -7,7 +7,7 @@ from amgm.models.mlp_multi import NeuralSDEMoEMultiAsset
 
 def get_trainer_cfg():
     # Relationship-driven basket: same-sector assets (SectorCode 40), mean pairwise
-    # return corr 0.84 in 2014-2017. Placeholder until Member 4's Exp 1 analysis.
+    # return corr 0.84 in 2014-2017.
     basket = ["00674201", "14335601", "13376801", "01272601", "00764701"]
     n_assets = len(basket)
 

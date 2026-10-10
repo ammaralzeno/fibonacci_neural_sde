@@ -21,7 +21,7 @@ from experiments.neural_SDE.compare_ablations_multi import EXP3_CONFIGS, config_
 BASKET_SUFFIX = {"same-sector": "", "concentrated": "_conc", "diversified": "_div"}
 SEEDS = (42, 43, 44, 45, 46, 47)  # seed-42 runs keep their original names
 
-# Period comparison on Member 4's baskets (Alireza's split: correlation is stronger 2018+)
+# Period comparison on the Exp 1 baskets (correlation is stronger in 2018+)
 PERIOD_SUFFIX = {"2015-2017": "", "2018-2020": "_late", "2014-2020": "_all"}
 PERIOD_BASKETS = {"concentrated": "_conc", "diversified": "_div"}
 
@@ -126,7 +126,7 @@ def write_basket_findings(output_dir, table):
         lines.append(f"| {basket} | {r0['mean_pairwise_corr']:.2f} | {r0['corr_ceiling']:.2f} | " + " | ".join(cells) + " |")
     lines += [
         "",
-        "Gain tracks the ceiling: decisive on same-sector, within noise on Member 4's (2015-2017) baskets.",
+        "Gain tracks the ceiling: decisive on same-sector; within noise on concentrated/diversified (2015-2017).",
         "Figure: `exp3_basket_scaling.png`. Data: `exp3_basket_comparison.csv`.",
     ]
     (Path(output_dir) / "exp3_basket_findings.md").write_text("\n".join(lines) + "\n")
@@ -203,7 +203,7 @@ def plot_period_scaling(table, output_file):
         grp = grp.set_index("period").loc[list(PERIOD_SUFFIX)].reset_index()
         ax.errorbar(
             grp["period"], grp["delta_mean"], yerr=grp["delta_std"],
-            marker="o", capsize=4, linewidth=1.4, label=f"{basket} (Member 4)",
+            marker="o", capsize=4, linewidth=1.4, label=basket,
         )
     ax.axhline(0, color="black", linewidth=0.8, label="Independent baseline")
     ax.set_ylabel("delta best validation NLL vs independent")
@@ -218,7 +218,7 @@ def plot_period_scaling(table, output_file):
 def write_period_findings(output_dir, table):
     """One-screen Exp 3 period findings."""
     lines = [
-        "# Exp 3 period comparison (Member 4's baskets)",
+        "# Exp 3 period comparison",
         "",
         f"Delta best val NLL vs independent (mean +/- std, {len(SEEDS)} seeds).",
         "Rolling correlation is ~50-65% stronger in 2018-2020 than 2015-2017 (Exp 1).",
@@ -266,7 +266,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Exp 3 comparisons.")
     parser.add_argument("--periods", action="store_true",
-                        help="Compare training periods on Member 4's baskets instead of comparing baskets.")
+                        help="Compare training periods on the concentrated/diversified baskets.")
     args = parser.parse_args()
     if args.periods:
         main_compare_periods()
