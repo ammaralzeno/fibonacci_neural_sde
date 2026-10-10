@@ -19,7 +19,7 @@ from amgm import config as amgm_config
 from experiments.neural_SDE.compare_ablations_multi import EXP3_CONFIGS, config_of, load_val_curves
 
 BASKET_SUFFIX = {"same-sector": "", "concentrated": "_conc", "diversified": "_div"}
-SEEDS = (42, 43, 44)  # seed-42 runs keep their original names
+SEEDS = (42, 43, 44, 45, 46, 47)  # seed-42 runs keep their original names
 
 
 def run_name(config, basket, seed):
