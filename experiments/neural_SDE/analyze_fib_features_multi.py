@@ -380,56 +380,112 @@ def plot_conditional_returns(cond_stats, basket, output_heatmap, output_overlays
 
 
 def write_findings(output_dir, basket, dates, mask, cooc, xcorr_summary, fsm_counts, cond_stats, top_pairs, eps):
-    """Slide-ready Exp 2 findings with the key numbers and figure references."""
+    """One-screen Exp 2 findings: headline number(s) per check (a)/(b)/(c)."""
     n = len(basket)
     off = ~np.eye(n, dtype=bool)
     lift_off = cooc["lift"][off]
     lift_off = lift_off[np.isfinite(lift_off)]
+    rates = cooc["p_near"]
+    bounce = [c["Bounce"] for c in fsm_counts]
+    hover = [c["Hover"] for c in fsm_counts]
 
     lines = [
-        "# Experiment 2 — Multi-asset Fibonacci features: findings",
+        f"# Exp 2 findings — {', '.join(basket)}",
         "",
-        f"Basket ({n} assets): {', '.join(basket)}",
-        f"Aligned calendar: {dates[0]} .. {dates[-1]}; rolling 252d windows: {mask.shape[0]} window-ends.",
-        f"Near-level definition: |D| < {eps} (paper's +/-0.02 band, normalized by window range).",
+        f"Aligned {dates[0]} .. {dates[-1]}, {mask.shape[0]} windows; near-level = |D| < {eps}.",
         "",
-        "## (a) Are Fibonacci levels meaningful independently for each asset?",
-        "",
-        f"- Near-level rate per asset: " + ", ".join(f"{b}: {p:.1%}" for b, p in zip(basket, cooc["p_near"])),
-        "- FSM interaction events on real data (Bounce/Break/Hover/Timeout per asset):",
+        f"(a) Levels meaningful per asset: near-level rate {rates.min():.0%}-{rates.max():.0%}; "
+        f"FSM events on every asset (Bounce {min(bounce)}-{max(bounce)}, Hover {min(hover)}-{max(hover)} each).",
+        f"(b) Simultaneity: co-occurrence lift {lift_off.mean():.2f} (1.0 = independence); "
+        f"lead/lag peaks at lag {xcorr_summary['peak_lag']} (|corr| = {abs(xcorr_summary['peak_abs_xcorr']):.3f}).",
+        "(c) Cross-asset effects, top KS pairs (A near level -> B's next-day returns):",
     ]
-    for b, c in zip(basket, fsm_counts):
-        lines.append(f"  - {b}: " + ", ".join(f"{k}={v}" for k, v in c.items()))
-    lines += [
-        "",
-        "Figures: `figA_simultaneous_levels.png`, `figB_distance_heatmap.png`, "
-        "`check_a_signed_distance_hist.png`, `check_a_fsm_events.png`.",
-        "",
-        "## (b) Do different assets reach Fibonacci levels simultaneously?",
-        "",
-        f"- Mean pairwise co-occurrence lift: {lift_off.mean():.2f} "
-        f"(1.0 = independence; >1 = simultaneous more often than chance).",
-        f"- Max lift: {np.nanmax(lift_off):.2f}; min lift: {np.nanmin(lift_off):.2f}.",
-        f"- Lead/lag: mean pairwise indicator cross-correlation peaks at lag "
-        f"{xcorr_summary['peak_lag']} days (|corr|={abs(xcorr_summary['peak_abs_xcorr']):.3f}).",
-        "",
-        "Figures: `check_b_cooccurrence_lift.png`, `check_b_lagged_xcorr.png`.",
-        "",
-        "## (c) Do Fibonacci events in one asset coincide with movements in another?",
-        "",
-        "Ordered pairs (A near level -> B's next-day returns), top KS statistic pairs:",
-    ]
-    for a, b, ks_val in top_pairs:
+    for a, b, ks_val in top_pairs[:2]:
         s = cond_stats[(a, b)]
         lines.append(
-            f"- {basket[a]} -> {basket[b]}: KS={ks_val:.2f} (p={s['ks_p']:.3f}), n={s['n_cond']}, "
+            f"    {basket[a]} -> {basket[b]}: KS = {ks_val:.2f} (p = {s['ks_p']:.3f}), "
             f"mean|ret| {s['mean_abs_cond']:.4f} vs {s['mean_abs_uncond']:.4f} unconditional"
         )
-    lines += [
-        "",
-        "Figures: `check_c_conditional_ks_heatmap.png`, `check_c_conditional_overlays.png`.",
-    ]
+    lines += ["", "Figures: `figA_simultaneous_levels.png`; combined: `../exp2_basket_comparison.png`."]
     (Path(output_dir) / "exp2_findings.md").write_text("\n".join(lines) + "\n")
+
+
+# ---------------------------------------------------------------------------
+# Cross-basket comparison
+# ---------------------------------------------------------------------------
+
+# Basket name -> issue_ids (None = the default basket from US_Stocks_Multi)
+EXP2_BASKETS = {
+    "same-sector": None,
+    "concentrated": ["00177301", "00187801", "00169001", "00116101"],
+    "diversified": ["00138001", "00141402", "00107801", "00116101"],
+}
+
+
+def plot_basket_comparison(basket_stats, output_file):
+    """Exp 2 across baskets: co-occurrence lift, lead/lag peak, and max cross-asset KS per basket."""
+    names = list(basket_stats)
+    x = np.arange(len(names))
+    panels = [
+        ("lift", "Do assets reach levels simultaneously?", "mean pairwise co-occurrence lift", 1.0),
+        ("peak_abs_xcorr", "Lead/lag of level approaches", "peak mean pairwise |corr|", 0.0),
+        ("max_ks", "Do events in A move B's returns?", "max cross-asset KS statistic", 0.0),
+    ]
+
+    fig, axes = plt.subplots(1, 3, figsize=(13.5, 3.8))
+    for ax, (key, title, ylabel, ref) in zip(axes, panels):
+        values = [basket_stats[n][key] for n in names]
+        ax.bar(x, values, color="tab:blue", width=0.55)
+        ax.axhline(ref, color="black", linewidth=0.8)
+        for xi, v in zip(x, values):
+            ax.text(xi, v + 0.02 * max(values), f"{v:.2f}", ha="center", fontsize=9)
+        ax.set_xticks(x, names, fontsize=9)
+        ax.set_ylabel(ylabel)
+        ax.set_title(title, fontsize=10)
+        ax.grid(True, alpha=0.3, axis="y")
+    axes[0].annotate("1.0 = independence", xy=(0.02, 1.01), xycoords=("axes fraction", "data"), fontsize=8)
+    fig.suptitle("Experiment 2: cross-asset Fibonacci effects vs basket dependency strength", fontsize=12)
+    fig.tight_layout()
+    fig.savefig(output_file, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
+def main_fib_basket_comparison(output_dir=None, eps=PAPER_BAND, max_lag=10):
+    """Exp 2 basket comparison: lift + lead/lag peak per basket in one figure."""
+    from experiments.neural_SDE.trainer_cfg.neural_SDE.US_Stocks_Multi import get_trainer_cfg
+
+    if output_dir is None:
+        output_dir = amgm_config.work_dir("neural_SDE") / "logs" / "exp2_fib_analysis"
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    stats = {}
+    for name, issue_ids in EXP2_BASKETS.items():
+        dset_cfg = dict(get_trainer_cfg()["dset_cfg"])
+        if issue_ids is not None:
+            dset_cfg["issue_ids"] = issue_ids
+        dataset = MultiAssetNeuralSDEDataset(**dset_cfg, rng_seed=42)
+        mask = near_level_mask(dataset.features.numpy(), eps)
+
+        lift = pairwise_cooccurrence(mask)["lift"]
+        lift_off = lift[~np.eye(lift.shape[0], dtype=bool)]
+        lags, xcorr = lagged_indicator_xcorr(mask, max_lag=max_lag)
+        mean_x = np.nanmean(xcorr[:, ~np.eye(lift.shape[0], dtype=bool)].reshape(len(lags), -1), axis=1)
+        peak = int(np.nanargmax(np.abs(mean_x)))
+        cond = conditional_returns(mask, next_day_returns(dataset))
+        max_ks = max(s["ks_stat"] for (a, b), s in cond.items() if a != b and np.isfinite(s["ks_stat"]))
+        stats[name] = {
+            "lift": float(lift_off[np.isfinite(lift_off)].mean()),
+            "peak_abs_xcorr": float(abs(mean_x[peak])),
+            "peak_lag": int(lags[peak]),
+            "max_ks": float(max_ks),
+        }
+
+    plot_basket_comparison(stats, output_dir / "exp2_basket_comparison.png")
+    for name, s in stats.items():
+        print(f"{name}: lift={s['lift']:.2f}, peak |xcorr|={s['peak_abs_xcorr']:.3f} at lag {s['peak_lag']}, max KS={s['max_ks']:.2f}")
+    print(f"Exp 2 basket comparison written to: {output_dir}")
+    return stats
 
 
 # ---------------------------------------------------------------------------
@@ -510,12 +566,21 @@ if __name__ == "__main__":
     parser.add_argument("--segment-days", type=int, default=252, help="Days shown in the simultaneous-levels figure.")
     parser.add_argument("--max-lag", type=int, default=10)
     parser.add_argument("--output-dir", default=None, help="Defaults to logs/exp2_fib_analysis.")
+    parser.add_argument("--issue-ids", nargs="*", default=None, help="Override the basket of IssueIds from the config.")
+    parser.add_argument("--basket-comparison", action="store_true",
+                        help="Compare the baskets of EXP2_BASKETS in one figure instead of the per-basket analysis.")
     args = parser.parse_args()
+
+    if args.basket_comparison:
+        main_fib_basket_comparison(output_dir=args.output_dir, eps=args.eps, max_lag=args.max_lag)
+        raise SystemExit(0)
 
     cfg_path = f"trainer_cfg.neural_SDE.{args.trainer_cfg}"
     cfg_module = importlib.import_module(cfg_path, package="experiments.neural_SDE")
     dset_cfg = dict(cfg_module.get_trainer_cfg()["dset_cfg"])
     dset_cfg["n_assets"] = args.n_assets
+    if args.issue_ids:
+        dset_cfg["issue_ids"] = args.issue_ids
 
     dataset = MultiAssetNeuralSDEDataset(**dset_cfg, rng_seed=42)
     main_fib_analysis(dataset=dataset, output_dir=args.output_dir,
