@@ -180,6 +180,8 @@ if __name__ == "__main__":
     parser.add_argument("--issue-ids", nargs="*", default=None, help="Override the basket of IssueIds from the config.")
     parser.add_argument("--run-name", default=None, help="Override run_cfg.run_name (log directory name).")
     parser.add_argument("--seed", type=int, default=None, help="Override run_cfg.rng_seed.")
+    parser.add_argument("--start-date", default=None, help="Override dset_cfg.start_date.")
+    parser.add_argument("--end-date", default=None, help="Override dset_cfg.end_date.")
     args = parser.parse_args()
 
     if args.trainer_cfg is None:
@@ -195,5 +197,9 @@ if __name__ == "__main__":
         trainer_cfg["run_cfg"] = dict(trainer_cfg["run_cfg"], run_name=args.run_name)
     if args.seed is not None:
         trainer_cfg["run_cfg"] = dict(trainer_cfg["run_cfg"], rng_seed=args.seed)
+    if args.start_date:
+        trainer_cfg["dset_cfg"] = dict(trainer_cfg["dset_cfg"], start_date=args.start_date)
+    if args.end_date:
+        trainer_cfg["dset_cfg"] = dict(trainer_cfg["dset_cfg"], end_date=args.end_date)
 
     main(trainer_cfg, save_rollout_plots, model_type)
