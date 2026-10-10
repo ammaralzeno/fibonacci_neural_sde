@@ -1,4 +1,4 @@
-# Exp 3 period comparison (Member 4's baskets)
+# Exp 3 period comparison
 
 Delta best val NLL vs independent (mean +/- std, 6 seeds).
 Rolling correlation is ~50-65% stronger in 2018-2020 than 2015-2017 (Exp 1).
