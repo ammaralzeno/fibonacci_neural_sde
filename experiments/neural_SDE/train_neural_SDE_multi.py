@@ -7,7 +7,7 @@ import numpy as np
 import torch
 from lightning import Trainer, seed_everything
 from lightning.pytorch import loggers as pl_loggers
-from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 import logging
 from torch.utils.data import DataLoader, random_split
 
@@ -110,7 +110,8 @@ def main(trainer_cfg, save_rollout_plots, model_type):
         check_val_every_n_epoch=1,
         logger=logger,
         accelerator="cpu",
-        callbacks=[checkpoint_callback]
+        # Correlation configs peak after a few epochs, then overfit (Exp 3)
+        callbacks=[checkpoint_callback, EarlyStopping(monitor="val/loss", mode="min", patience=4)]
     )
     trainer.fit(mdl, train_dataloaders=train_loader, val_dataloaders=val_loader)
 
@@ -178,6 +179,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--issue-ids", nargs="*", default=None, help="Override the basket of IssueIds from the config.")
     parser.add_argument("--run-name", default=None, help="Override run_cfg.run_name (log directory name).")
+    parser.add_argument("--seed", type=int, default=None, help="Override run_cfg.rng_seed.")
     args = parser.parse_args()
 
     if args.trainer_cfg is None:
@@ -191,5 +193,7 @@ if __name__ == "__main__":
         trainer_cfg["dset_cfg"] = dict(trainer_cfg["dset_cfg"], issue_ids=args.issue_ids)
     if args.run_name:
         trainer_cfg["run_cfg"] = dict(trainer_cfg["run_cfg"], run_name=args.run_name)
+    if args.seed is not None:
+        trainer_cfg["run_cfg"] = dict(trainer_cfg["run_cfg"], rng_seed=args.seed)
 
     main(trainer_cfg, save_rollout_plots, model_type)

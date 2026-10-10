@@ -445,17 +445,18 @@ EXP2_BASKETS = {
 
 
 def plot_basket_comparison(basket_stats, output_file):
-    """Exp 2 across baskets: co-occurrence lift and lead/lag peak per basket."""
+    """Exp 2 across baskets: co-occurrence lift, lead/lag peak, and max cross-asset KS per basket."""
     names = list(basket_stats)
-    lifts = [basket_stats[n]["lift"] for n in names]
-    peaks = [basket_stats[n]["peak_abs_xcorr"] for n in names]
     x = np.arange(len(names))
+    panels = [
+        ("lift", "Do assets reach levels simultaneously?", "mean pairwise co-occurrence lift", 1.0),
+        ("peak_abs_xcorr", "Lead/lag of level approaches", "peak mean pairwise |corr|", 0.0),
+        ("max_ks", "Do events in A move B's returns?", "max cross-asset KS statistic", 0.0),
+    ]
 
-    fig, axes = plt.subplots(1, 2, figsize=(9.5, 3.8))
-    for ax, values, title, ylabel, ref in [
-        (axes[0], lifts, "Do assets reach Fibonacci levels simultaneously?", "mean pairwise co-occurrence lift", 1.0),
-        (axes[1], peaks, "Lead/lag of level approaches across assets", "peak mean pairwise |corr|", 0.0),
-    ]:
+    fig, axes = plt.subplots(1, 3, figsize=(13.5, 3.8))
+    for ax, (key, title, ylabel, ref) in zip(axes, panels):
+        values = [basket_stats[n][key] for n in names]
         ax.bar(x, values, color="tab:blue", width=0.55)
         ax.axhline(ref, color="black", linewidth=0.8)
         for xi, v in zip(x, values):
@@ -465,7 +466,7 @@ def plot_basket_comparison(basket_stats, output_file):
         ax.set_title(title, fontsize=10)
         ax.grid(True, alpha=0.3, axis="y")
     axes[0].annotate("1.0 = independence", xy=(0.02, 1.01), xycoords=("axes fraction", "data"), fontsize=8)
-    fig.suptitle("Experiment 2: Fibonacci simultaneity vs basket dependency strength", fontsize=12)
+    fig.suptitle("Experiment 2: cross-asset Fibonacci effects vs basket dependency strength", fontsize=12)
     fig.tight_layout()
     fig.savefig(output_file, dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -493,15 +494,18 @@ def main_fib_basket_comparison(output_dir=None, eps=PAPER_BAND, max_lag=10):
         lags, xcorr = lagged_indicator_xcorr(mask, max_lag=max_lag)
         mean_x = np.nanmean(xcorr[:, ~np.eye(lift.shape[0], dtype=bool)].reshape(len(lags), -1), axis=1)
         peak = int(np.nanargmax(np.abs(mean_x)))
+        cond = conditional_returns(mask, next_day_returns(dataset))
+        max_ks = max(s["ks_stat"] for (a, b), s in cond.items() if a != b and np.isfinite(s["ks_stat"]))
         stats[name] = {
             "lift": float(lift_off[np.isfinite(lift_off)].mean()),
             "peak_abs_xcorr": float(abs(mean_x[peak])),
             "peak_lag": int(lags[peak]),
+            "max_ks": float(max_ks),
         }
 
     plot_basket_comparison(stats, output_dir / "exp2_basket_comparison.png")
     for name, s in stats.items():
-        print(f"{name}: lift={s['lift']:.2f}, peak |xcorr|={s['peak_abs_xcorr']:.3f} at lag {s['peak_lag']}")
+        print(f"{name}: lift={s['lift']:.2f}, peak |xcorr|={s['peak_abs_xcorr']:.3f} at lag {s['peak_lag']}, max KS={s['max_ks']:.2f}")
     print(f"Exp 2 basket comparison written to: {output_dir}")
     return stats
 
