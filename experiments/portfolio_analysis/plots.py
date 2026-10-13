@@ -57,7 +57,8 @@ def check_file(file_path):
 def load_correlation_matrix(file_path):
 
     check_file(file_path)
-    matrix = pd.read_csv(file_path, index_col=0)
+    matrix = pd.read_csv(file_path, converters={0: str})
+    matrix = matrix.set_index(matrix.columns[0])
 
     matrix.index = matrix.index.astype(str)
     matrix.columns = matrix.columns.astype(str)
