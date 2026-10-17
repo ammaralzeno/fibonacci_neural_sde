@@ -1,0 +1,21 @@
+IssueId,Asset,FibLabel,FibRatio,HitDays,EventCount
+00107801,Health Care,236,0.236,17,13
+00107801,Health Care,382,0.382,18,11
+00107801,Health Care,500,0.5,26,14
+00107801,Health Care,618,0.618,27,12
+00107801,Health Care,786,0.786,100,62
+00116101,Information Technology,236,0.236,13,9
+00116101,Information Technology,382,0.382,22,18
+00116101,Information Technology,500,0.5,31,23
+00116101,Information Technology,618,0.618,38,21
+00116101,Information Technology,786,0.786,110,66
+00138001,Energy,236,0.236,44,29
+00138001,Energy,382,0.382,47,28
+00138001,Energy,500,0.5,42,29
+00138001,Energy,618,0.618,75,42
+00138001,Energy,786,0.786,54,32
+00141402,Financials,236,0.236,16,14
+00141402,Financials,382,0.382,12,9
+00141402,Financials,500,0.5,24,18
+00141402,Financials,618,0.618,35,26
+00141402,Financials,786,0.786,99,54
