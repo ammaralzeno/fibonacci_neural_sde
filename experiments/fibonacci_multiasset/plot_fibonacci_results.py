@@ -163,6 +163,8 @@ def plot_simultaneity(pairwise):
     fig, ax = plt.subplots(figsize=(9, 7))
     norm = TwoSlopeNorm(vmin=0.5, vcenter=1.0, vmax=2.0)
     image = draw_heatmap(ax, lift, "Same-Day Fibonacci Event Coincidence Lift", norm, lambda value: f"{value:.2f}×")
+    ax.set_xlabel("Asset")
+    ax.set_ylabel("Asset")
 
     for i in range(len(ASSETS)):
         for j in range(len(ASSETS)):
@@ -216,13 +218,17 @@ def plot_forward_effects(cross):
     scale = max(0.5, np.ceil(max_abs * 2) / 2)
     norm = TwoSlopeNorm(vmin=-scale, vcenter=0, vmax=scale)
 
-    fig, axes = plt.subplots(1, 3, figsize=(20, 6))
+    fig, axes = plt.subplots(1, 3, figsize=(22, 7), sharey=True, constrained_layout=True)
 
     for ax, horizon in zip(axes, HORIZONS):
 
         subset = forward[forward["HorizonDays"] == horizon]
         matrix = make_matrix(subset, "MeanDifferencePP")
         image = draw_heatmap(ax, matrix, f"{horizon}-Day Forward Return", norm, lambda value: f"{value:+.2f}")
+
+        if ax is not axes[0]:
+            ax.set_ylabel("")
+            ax.tick_params(axis="y", labelleft=False)
 
     fig.colorbar(image, ax=axes, shrink=0.65, label="Event − non-event return (percentage points)")
     fig.suptitle("Target Forward Returns Conditional on Source Fibonacci Events", fontsize=14)
