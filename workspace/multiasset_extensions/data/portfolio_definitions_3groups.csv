@@ -1,0 +1,13 @@
+portfolio,IssueId,Country,SectorCode,Sector,IndustryCode,SubIndustryCode,first_date,last_date,valid_prices,missing_prices,duplicate_dates,Company,Ticker
+diversified,00138001,US,10,Energy,101020,10102020,2014-12-31,2020-12-31,1512,0,0,,
+diversified,00107801,US,35,Health Care,351010,35101010,2014-12-31,2020-12-31,1512,0,0,,
+diversified,00141402,US,40,Financials,403010,40301020,2014-12-31,2020-12-31,1512,0,0,,
+diversified,00116101,US,45,Information Technology,453010,45301020,2014-12-31,2020-12-31,1512,0,0,,
+concentrated,00116101,US,45,Information Technology,453010,45301020,2014-12-31,2020-12-31,1512,0,0,,
+concentrated,00169001,US,45,Information Technology,452020,45202030,2014-12-31,2020-12-31,1512,0,0,,
+concentrated,00177301,US,45,Information Technology,452030,45203030,2014-12-31,2020-12-31,1512,0,0,,
+concentrated,00187801,US,45,Information Technology,451030,45103010,2014-12-31,2020-12-31,1512,0,0,,
+beverage_concentrated,00313801,US,30,Consumer Staples,302010,30201030,2014-12-31,2020-12-31,1512,0,0,Coca-Cola Consolidated,COKE
+beverage_concentrated,00314401,US,30,Consumer Staples,302010,30201030,2014-12-31,2020-12-31,1512,0,0,The Coca-Cola Company,KO
+beverage_concentrated,00847901,US,30,Consumer Staples,302010,30201030,2014-12-31,2020-12-31,1512,0,0,PepsiCo,PEP
+beverage_concentrated,02446301,US,30,Consumer Staples,302010,30201030,2014-12-31,2020-12-31,1512,0,0,National Beverage,FIZZ
