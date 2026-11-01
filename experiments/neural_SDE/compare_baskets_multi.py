@@ -23,7 +23,7 @@ SEEDS = (42, 43, 44, 45, 46, 47)  # seed-42 runs keep their original names
 
 # Period comparison on the Exp 1 baskets (correlation is stronger in 2018+)
 PERIOD_SUFFIX = {"2015-2017": "", "2018-2020": "_late", "2014-2020": "_all"}
-PERIOD_BASKETS = {"concentrated": "_conc", "diversified": "_div"}
+PERIOD_BASKETS = {"concentrated": "_conc", "diversified": "_div", "high-correlation": "_hc"}
 
 
 def run_name(config, basket, seed):
@@ -160,11 +160,12 @@ def _period_run_name(config, basket, period, seed):
     return name if seed == SEEDS[0] else f"{name}_s{seed}"
 
 
-def build_period_table(log_root, seeds=SEEDS):
+def build_period_table(log_root, seeds=SEEDS, baskets=None):
     """One row per basket x period x configuration: best validation NLL (mean/std over
     seeds) and delta vs the independent run of the same basket, period, and seed."""
     configs = list(EXP3_CONFIGS)
-    baskets, periods = list(PERIOD_BASKETS), list(PERIOD_SUFFIX)
+    baskets = list(PERIOD_BASKETS) if baskets is None else list(baskets)
+    periods = list(PERIOD_SUFFIX)
     all_runs = [_period_run_name(c, b, p, s) for b in baskets for p in periods for c in configs for s in seeds]
     curves = load_val_curves(log_root, all_runs)
 
@@ -221,7 +222,7 @@ def write_period_findings(output_dir, table):
         "# Exp 3 period comparison",
         "",
         f"Delta best val NLL vs independent (mean +/- std, {len(SEEDS)} seeds).",
-        "Rolling correlation is ~50-65% stronger in 2018-2020 than 2015-2017 (Exp 1).",
+        "Negative means the joint model fits the held-out days better than independent assets.",
         "",
         "| Basket | Period | mean corr | ceiling | Correlation only | Full joint |",
         "|---|---|---|---|---|---|",
@@ -251,7 +252,19 @@ def main_compare_periods(log_root=None, output_dir=None):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    table = build_period_table(log_root)
+    # Baskets whose raw logs were not kept are reused from the existing comparison CSV.
+    available, kept = [], []
+    for basket in PERIOD_BASKETS:
+        probe = log_root / _period_run_name("exp3_independent", basket, "2015-2017", SEEDS[0]) / "metrics.csv"
+        (available if probe.exists() else kept).append(basket)
+    fresh = build_period_table(log_root, baskets=available) if available else pd.DataFrame()
+    previous = output_dir / "exp3_period_comparison.csv"
+    if kept and previous.exists():
+        old = pd.read_csv(previous)
+        old = old[old["basket"].isin(kept)]
+        table = pd.concat([old, fresh], ignore_index=True)
+    else:
+        table = fresh
     table.to_csv(output_dir / "exp3_period_comparison.csv", index=False)
     plot_period_scaling(table, output_dir / "exp3_period_scaling.png")
     write_period_findings(output_dir, table)
@@ -266,7 +279,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Exp 3 comparisons.")
     parser.add_argument("--periods", action="store_true",
-                        help="Compare training periods on the concentrated/diversified baskets.")
+                        help="Compare training periods on the concentrated, diversified, and high-correlation baskets.")
     args = parser.parse_args()
     if args.periods:
         main_compare_periods()
