@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Joint multi-asset MoE Neural SDE</title>
+<style>
+  body { margin: 0; padding: 30px; background: #fff; }
+</style>
+</head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="330" viewBox="0 0 1160 330"
+     font-family="Liberation Serif, Times New Roman, serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9a9a9a"/>
+    </marker>
+  </defs>
+
+  <!-- X input: stacked green squares -->
+  <rect x="175" y="20" width="24" height="30" fill="#c8f5c8"/>
+  <rect x="175" y="54" width="24" height="30" fill="#c8f5c8"/>
+  <rect x="175" y="88" width="24" height="30" fill="#c8f5c8"/>
+  <rect x="175" y="122" width="24" height="30" fill="#c8f5c8"/>
+  <text x="95" y="91" font-size="17" font-style="italic">X<tspan dy="-8" font-size="11" font-style="normal">(n)</tspan><tspan dy="13" font-size="12">[t−w,t]</tspan></text>
+
+  <!-- D input: blue square -->
+  <rect x="175" y="238" width="24" height="30" fill="#b8def5"/>
+  <text x="112" y="258" font-size="17" font-style="italic">D<tspan dy="-8" font-size="11" font-style="normal">(n)</tspan><tspan dy="13" font-size="12">t</tspan></text>
+
+  <!-- Encoder -->
+  <rect x="245" y="20" width="46" height="132" rx="18" fill="#fdf6d2" stroke="#1c1c8f" stroke-width="1.6"/>
+  <text transform="translate(273,86) rotate(-90)" text-anchor="middle" font-size="15">Encoder<tspan font-size="11" font-style="italic" dy="4">ω</tspan><tspan dy="-4">(·)</tspan></text>
+
+  <!-- Mean over assets (new) -->
+  <rect x="226" y="176" width="84" height="44" rx="16" fill="#e4dcf7" stroke="#1c1c8f" stroke-width="1.6"/>
+  <text x="268" y="195" text-anchor="middle" font-size="14">Mean over</text>
+  <text x="268" y="212" text-anchor="middle" font-size="14">assets</text>
+
+  <!-- Concatenate -->
+  <rect x="338" y="20" width="46" height="250" rx="18" fill="#fdf6d2" stroke="#1c1c8f" stroke-width="1.6"/>
+  <text transform="translate(366,145) rotate(-90)" text-anchor="middle" font-size="15">Concatenate</text>
+
+  <!-- Experts / gating -->
+  <rect x="445" y="58" width="140" height="50" rx="18" fill="#fdf6d2" stroke="#1c1c8f" stroke-width="1.6"/>
+  <text x="515" y="79" text-anchor="middle" font-size="14.5">Drift</text>
+  <text x="515" y="97" text-anchor="middle" font-size="14.5">Experts</text>
+  <rect x="445" y="120" width="140" height="48" rx="18" fill="#fdf6d2" stroke="#1c1c8f" stroke-width="1.6"/>
+  <text x="515" y="149" text-anchor="middle" font-size="14.5">Gating</text>
+  <rect x="445" y="180" width="140" height="50" rx="18" fill="#fdf6d2" stroke="#1c1c8f" stroke-width="1.6"/>
+  <text x="515" y="201" text-anchor="middle" font-size="14.5">Diffusion</text>
+  <text x="515" y="219" text-anchor="middle" font-size="14.5">Experts</text>
+
+  <!-- Output tags -->
+  <text x="633" y="88" font-size="14.5">[3 Experts]</text>
+  <rect x="740" y="70" width="30" height="26" fill="#fbe2d3"/>
+  <text x="755" y="89" text-anchor="middle" font-size="16" font-style="italic">μ<tspan font-size="11" dy="4">e</tspan></text>
+  <text x="638" y="149" font-size="14.5">[Softmax]</text>
+  <rect x="740" y="131" width="30" height="26" fill="#fbe2d3"/>
+  <text x="755" y="150" text-anchor="middle" font-size="16" font-style="italic">π</text>
+  <text x="633" y="210" font-size="14.5">[3 Experts]</text>
+  <rect x="740" y="192" width="30" height="26" fill="#fbe2d3"/>
+  <text x="755" y="211" text-anchor="middle" font-size="16" font-style="italic">σ<tspan font-size="11" dy="4">e</tspan></text>
+
+  <!-- Arrows -->
+  <g stroke="#9a9a9a" stroke-width="1.8" fill="none">
+    <path d="M199,86 H241" marker-end="url(#a)"/>
+    <path d="M291,86 H334" marker-end="url(#a)"/>
+    <path d="M268,152 V172" marker-end="url(#a)"/>
+    <path d="M310,198 H334" marker-end="url(#a)"/>
+    <path d="M199,253 H334" marker-end="url(#a)"/>
+    <path d="M384,144 H412"/>
+    <path d="M412,83 V205"/>
+    <path d="M412,83 H441" marker-end="url(#a)"/>
+    <path d="M412,144 H441" marker-end="url(#a)"/>
+    <path d="M412,205 H441" marker-end="url(#a)"/>
+    <path d="M585,83 H631" marker-end="url(#a)"/>
+    <path d="M585,144 H636" marker-end="url(#a)"/>
+    <path d="M585,205 H631" marker-end="url(#a)"/>
+    <path d="M770,284 H815" marker-end="url(#a)"/>
+  </g>
+  <text x="304" y="74" font-size="16" font-style="italic">Z<tspan font-size="11" font-style="normal" dy="-8">(n)</tspan><tspan font-size="11" dy="13">t</tspan></text>
+  <text x="313" y="190" font-size="16" font-style="italic">c<tspan font-size="11" dy="4">t</tspan></text>
+
+  <!-- Big gray arrow -->
+  <path d="M781,136 H807 V126 L825,144 L807,162 V152 H781 Z" fill="#d6d6d6"/>
+
+  <!-- Learned correlation (new) -->
+  <rect x="640" y="262" width="130" height="44" rx="16" fill="#e4dcf7" stroke="#1c1c8f" stroke-width="1.6"/>
+  <text x="705" y="281" text-anchor="middle" font-size="14">Learned</text>
+  <text x="705" y="298" text-anchor="middle" font-size="14">correlation</text>
+  <text x="781" y="276" font-size="16" font-style="italic">R</text>
+
+  <!-- Output dashed box -->
+  <rect x="835" y="20" width="185" height="290" rx="26" fill="none" stroke="#1c1c8f" stroke-width="2.4" stroke-dasharray="11,7"/>
+  <text x="861" y="78" font-size="16" font-style="italic">μ<tspan font-size="11" font-style="normal" dy="-8">(n)</tspan><tspan dy="8"> = </tspan><tspan font-size="22" font-style="normal" dy="3">∑</tspan><tspan dy="-3"> π</tspan><tspan font-size="11" dy="4">i</tspan><tspan dy="-4">μ</tspan><tspan font-size="11" dy="4">i</tspan></text>
+  <text x="906" y="98" font-size="11" font-style="italic">i</text>
+
+  <text x="859" y="170" font-size="16" font-style="italic">σ<tspan font-size="11" font-style="normal" dy="-8">(n)</tspan><tspan dy="8"> =</tspan></text>
+  <path d="M896,162 L901,160 L907,178 L916,138 H1000" stroke="#000" stroke-width="1.1" fill="none"/>
+  <text x="919" y="170" font-size="16" font-style="italic"><tspan font-size="22" font-style="normal" dy="3">∑</tspan><tspan dy="-3"> π</tspan><tspan font-size="11" dy="4">i</tspan><tspan dy="-4">σ</tspan><tspan font-size="11" dy="-8">2</tspan><tspan font-size="11" dx="-6" dy="14">i</tspan></text>
+  <text x="925" y="190" font-size="11" font-style="italic">i</text>
+
+  <text x="849" y="290" font-size="16" font-style="italic">Σ<tspan font-style="normal"> = diag(</tspan>σ<tspan font-style="normal">) </tspan>R<tspan font-style="normal"> diag(</tspan>σ<tspan font-style="normal">)</tspan></text>
+</svg>
+</body>
+</html>
