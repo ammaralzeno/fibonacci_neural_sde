@@ -1,0 +1,5 @@
+config,label,use_context,learn_corr,best_val_nll,best_epoch,final_val_nll,best_val_loss,delta_vs_independent
+exp3_independent,"Independent (no context, R=I)",False,False,-9.151424407958984,16,-9.062180519104004,-9.160198211669922,0.0
+exp3_corr_only,Correlation only,False,True,-10.90868854522705,4,-8.912857055664062,-10.91712474822998,-1.7572641372680664
+exp3_context_only,Context only (R=I),True,False,-9.164470672607422,18,-9.000173568725586,-9.17309856414795,-0.0130462646484375
+exp3_full,Full joint (context + R),True,True,-10.673516273498535,4,-9.37222385406494,-10.680590629577637,-1.5220918655395508
