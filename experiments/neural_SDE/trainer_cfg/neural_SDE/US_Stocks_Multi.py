@@ -24,7 +24,7 @@ def get_trainer_cfg():
         issue_ids=basket,   # explicit basket of IssueIds; if empty, the n_assets assets with the most complete coverage are selected
         n_assets=n_assets,
         start_date="2014-12-31",
-        end_date="2017-12-31",
+        end_date="2020-12-31",
         lookback_window=252,
         max_windows=None,   # optional cap on the number of windows (evenly spaced subsampling)
         dt= 1.0,        # dt in: X_{t+1} = X_t + mu(X_t) * dt + sigma(X_t) * sqrt(dt) * (L_R dW)_t
