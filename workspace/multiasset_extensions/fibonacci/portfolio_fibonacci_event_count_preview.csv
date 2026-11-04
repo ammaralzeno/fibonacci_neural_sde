@@ -1,0 +1,13 @@
+Portfolio,Period,N_Dates,EventStarts,HitDays,DatesWith2PlusEvents,DatesWith3PlusEvents
+diversified,2016-2017,503,189,313,24,3
+diversified,2018-2019,503,227,365,39,4
+diversified,2020,253,111,168,18,2
+diversified,full_2015-2020,1261,530,850,82,10
+concentrated,2016-2017,503,135,219,13,1
+concentrated,2018-2019,503,248,365,40,7
+concentrated,2020,253,93,131,16,3
+concentrated,full_2015-2020,1261,479,718,70,11
+ultra_concentrated,2016-2017,503,173,293,34,3
+ultra_concentrated,2018-2019,503,206,318,37,5
+ultra_concentrated,2020,253,116,177,26,3
+ultra_concentrated,full_2015-2020,1261,496,789,97,11
