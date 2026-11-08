@@ -152,3 +152,11 @@ def test_invalid_gate_configuration_raises():
     with pytest.raises(ValueError, match="lookback_window"):
         NeuralSDEMoE(lookback_window=12, gate_inputs="features")
     NeuralSDEMoE(lookback_window=12)  # legacy gate keeps working with short test windows
+
+
+def test_exp2_exports_gate_columns_only_for_long_windows():
+    from experiments.neural_SDE.gating_diagnostics.analysis import export_gate_features
+    columns = export_gate_features(normalise(gbm(batch=4)).numpy())
+    assert list(columns) == [f"gate_{name}" for name in PRICE_V1_NAMES]
+    assert all(v.shape == (4,) for v in columns.values())
+    assert export_gate_features(np.random.rand(4, 12).astype(np.float32)) == {}

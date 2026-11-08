@@ -12,10 +12,14 @@ import torch
 
 from amgm.models.neural_SDE.runner import NeuralSDERunner
 from amgm.models.mlp import NeuralSDEMoE
+from amgm.models.neural_SDE.gate_features import compute_gate_features, get_gate_feature_set
 from experiments.neural_SDE.fibonacci_state_detection import detect_fibonacci_interactions
 from .collection import write_manifest
 from .statistics import PROBS, RATIOS, window_features, validate_probabilities, distance_summary, movement_summary
 
+# Exported for every checkpoint (legacy gates included) so probes can test whether
+# these inputs predict FSM events, and whether a feature-gated model uses them.
+EXPORT_GATE_FEATURES = "price_v1"
 EVENT_NAMES = {"pullback": "Bounce", "breakout": "Break", "hover": "Hover"}
 EVENT_COLUMNS = ["segment_id", "issue_id", "origin_date", "event", "entry_index", "hover_index",
                  "exit_index", "confirmation_end_index", "output_index", "gate_index", "duration",
@@ -111,6 +115,15 @@ def incomplete_interactions(prices, levels, horizon):
     return len(unfinished - finished)
 
 
+def export_gate_features(x):
+    """Columns gate_<name> for real_gates.csv; empty when the window is too short."""
+    feature_set = get_gate_feature_set(EXPORT_GATE_FEATURES)
+    if x.shape[1] < feature_set.min_lookback:
+        return {}
+    g = compute_gate_features(EXPORT_GATE_FEATURES, torch.from_numpy(x)).numpy()
+    return {f"gate_{name}": g[:, i] for i, name in enumerate(feature_set.names)}
+
+
 def collect_real_gates(runner, prices, issue_ids, lookback=252, horizon=100):
     samples, events, segments, exclusions = [], [], [], []
     for iid in issue_ids:
@@ -131,6 +144,7 @@ def collect_real_gates(runner, prices, issue_ids, lookback=252, horizon=100):
                 continue
             windows = np.lib.stride_tricks.sliding_window_view(raw, lookback).copy()
             x, f, d, v, nearest = window_features(windows)
+            gate_columns = export_gate_features(x)
             with torch.inference_mode():
                 p = runner(torch.from_numpy(x), torch.from_numpy(f))[2].cpu().numpy()
             validate_probabilities(p)
@@ -154,6 +168,7 @@ def collect_real_gates(runner, prices, issue_ids, lookback=252, horizon=100):
                            nearest_level=int(nearest[j]), aggregate=j < horizon)
                 row.update(zip(PROBS, p[j]))
                 row.update({f"distance_{k}": f[j, k] for k in range(7)})
+                row.update({name: float(values[j]) for name, values in gate_columns.items()})
                 samples.append(row)
     if not samples:
         raise ValueError("No complete valid 2018-2020 evaluation segments; inspect data and stock selection")
