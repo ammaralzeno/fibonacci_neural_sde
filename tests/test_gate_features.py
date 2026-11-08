@@ -93,3 +93,62 @@ def test_clip_and_constant_tail_eps():
     assert torch.isfinite(g).all()
     assert g.abs().max() <= 5.0
     assert g[0, COL["dist_vol_0"]] == 5.0  # far above level 0 in tiny-vol units
+
+
+# --- NeuralSDEMoE gate_inputs --------------------------------------------------------------
+
+from amgm.models.mlp import NeuralSDEMoE  # noqa: E402
+
+
+def moe(**kwargs):
+    torch.manual_seed(0)
+    return NeuralSDEMoE(lookback_window=W, num_features=7, hidden_sizes=[32, 16], **kwargs)
+
+
+def model_inputs(batch=16):
+    x = normalise(gbm(batch=batch, seed=3))
+    f = x[:, -1:] - torch.tensor(FIB_RATIOS)
+    return x, f
+
+
+def test_default_gate_is_the_legacy_architecture():
+    legacy, explicit = moe(), moe(gate_inputs="h")
+    assert legacy.gate_feature_names == ()
+    assert {k: v.shape for k, v in legacy.state_dict().items()} == \
+        {k: v.shape for k, v in explicit.state_dict().items()}
+    assert legacy.gate_head.fc_gate.in_features == 16 + 7
+    x, f = model_inputs()
+    for a, b in zip(legacy(x, f), explicit(x, f)):
+        torch.testing.assert_close(a, b)
+
+
+@pytest.mark.parametrize("mode,set_name,in_dim", [
+    ("features", "price_v1", 14), ("features", "vol_only", 2), ("h+features", "price_v1", 16 + 7 + 14)])
+def test_feature_gates_forward_and_train(mode, set_name, in_dim):
+    model = moe(gate_inputs=mode, gate_feature_set=set_name)
+    assert model.gate_head.fc_gate.in_features == in_dim
+    x, f = model_inputs()
+    mu, sigma, pi = model(x, f)
+    assert mu.shape == sigma.shape == (16, 1)
+    torch.testing.assert_close(pi.sum(1), torch.ones(16))
+    (mu.sum() + sigma.sum()).backward()
+    assert model.gate_head.fc_gate.weight.grad.abs().sum() > 0
+    assert model.gate_features(x).shape == (16, len(model.gate_feature_names))
+
+
+def test_feature_gate_ignores_encoder_path_but_uses_gate_features():
+    model = moe(gate_inputs="features")
+    x, f = model_inputs()
+    _, _, pi = model(x, f)
+    _, _, pi_other_f = model(x, f + 0.3)  # f feeds experts only in this mode
+    torch.testing.assert_close(pi, pi_other_f)
+
+
+def test_invalid_gate_configuration_raises():
+    with pytest.raises(ValueError, match="gate_inputs"):
+        moe(gate_inputs="bogus")
+    with pytest.raises(ValueError, match="gate_feature_set"):
+        moe(gate_inputs="features", gate_feature_set="bogus")
+    with pytest.raises(ValueError, match="lookback_window"):
+        NeuralSDEMoE(lookback_window=12, gate_inputs="features")
+    NeuralSDEMoE(lookback_window=12)  # legacy gate keeps working with short test windows

@@ -2,6 +2,8 @@ from torch import nn
 import torch
 import torch.nn.functional as F
 
+from amgm.models.neural_SDE.gate_features import GATE_INPUT_MODES, compute_gate_features, get_gate_feature_set
+
 class MLPModel(nn.Module):
 
     def __init__(self, input_length, feats=1, hidden_sizes=(64, 8), output_size=1):
@@ -172,9 +174,24 @@ class NeuralSDEMoE(nn.Module):
       - Hover Expert (Bounded drift, low volatility)
     """
 
-    def __init__(self, lookback_window, num_features=7, hidden_sizes=(64, 32), output_size=1, gate_temperature=1.0):
+    def __init__(self, lookback_window, num_features=7, hidden_sizes=(64, 32), output_size=1, gate_temperature=1.0,
+                 gate_inputs="h", gate_feature_set="price_v1", gate_feature_options=None):
+        """gate_inputs: "h" (legacy, gate sees [Z_t || f_t]), "features" (gate sees only the
+        gate features g_t from ``gate_features.GATE_FEATURE_SETS[gate_feature_set]``) or
+        "h+features" (gate sees [h || g_t]). Experts always see h."""
         super().__init__()
         self.gate_temperature = gate_temperature # scaling test
+        if gate_inputs not in GATE_INPUT_MODES:
+            raise ValueError(f"Unknown gate_inputs={gate_inputs!r}; choose from {GATE_INPUT_MODES}")
+        self.gate_inputs = gate_inputs
+        self.gate_feature_set = gate_feature_set
+        self.gate_feature_options = dict(gate_feature_options or {})
+        self.gate_feature_names = ()
+        if gate_inputs != "h":
+            feature_set = get_gate_feature_set(gate_feature_set)
+            if lookback_window < feature_set.min_lookback:
+                raise ValueError(f"gate_feature_set={gate_feature_set!r} needs lookback_window >= {feature_set.min_lookback}")
+            self.gate_feature_names = feature_set.names
 
         self.lookback_window = lookback_window
         self.num_features = num_features
@@ -188,7 +205,8 @@ class NeuralSDEMoE(nn.Module):
         h_dim = hidden_sizes[-1] + num_features
 
         # 1. Gating Network (Outputs 3 logits)
-        self.gate_head = GateHead(h_dim, hidden_dim=64, num_experts=3)
+        gate_in_dim = {"h": h_dim, "features": 0, "h+features": h_dim}[gate_inputs] + len(self.gate_feature_names)
+        self.gate_head = GateHead(gate_in_dim, hidden_dim=64, num_experts=3)
 
         # 2. Expert Heads for Drift Magnitude
         self.mu_bounce_head = ExpertHead(h_dim, hidden_dim=32, out_dim=output_size)
@@ -238,7 +256,13 @@ class NeuralSDEMoE(nn.Module):
         h = torch.cat([Z_t, f_t], dim=1)  # Shape: (batch_size, hidden_dim + feature_dim)
 
         # 3. Pass concatenated vector 'h' to gating head and expert heads
-        pi = F.softmax(self.gate_head(h) / self.gate_temperature, dim=-1)
+        if self.gate_inputs == "h":
+            gate_in = h
+        elif self.gate_inputs == "features":
+            gate_in = self.gate_features(x_hist)
+        else:
+            gate_in = torch.cat([h, self.gate_features(x_hist)], dim=1)
+        pi = F.softmax(self.gate_head(gate_in) / self.gate_temperature, dim=-1)
         pi_bounce = pi[:, 0:1]
         pi_break  = pi[:, 1:2]
         pi_hover  = pi[:, 2:3]
@@ -265,6 +289,12 @@ class NeuralSDEMoE(nn.Module):
         sigma_out = torch.sqrt(var_out)
 
         return mu_out, sigma_out, pi
+
+    def gate_features(self, x_hist):
+        """Gate-only inputs g_t of shape (B, G); (B, 0) for the legacy gate."""
+        if not self.gate_feature_names:
+            return x_hist.new_zeros((x_hist.shape[0], 0))
+        return compute_gate_features(self.gate_feature_set, x_hist, **self.gate_feature_options)
 
 class PatchNeuralSDETransformer(nn.Module):
     """Patch-based Transformer: Downsamples sequence length before attention."""
