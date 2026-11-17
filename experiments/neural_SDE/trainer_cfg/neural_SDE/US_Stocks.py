@@ -38,6 +38,9 @@ def get_trainer_cfg():
         num_features=7,
         hidden_sizes=[32, 16],
         output_size=output_size,
+        gate_inputs="h",  # "h" (legacy), "features" (gate sees only gate features) or "h+features"
+        gate_feature_set="price_v1",  # key of amgm.models.neural_SDE.gate_features.GATE_FEATURE_SETS
+        gate_feature_options={},  # kwargs of the feature set, e.g. {"clip": 5.0, "zone_tol": 0.02}
     )
 
     trainer_cfg = dict(
